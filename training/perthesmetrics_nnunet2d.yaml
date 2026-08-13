@@ -1,0 +1,32 @@
+dataset:
+  id: 1
+  name: PerthesMetrics
+  description: Multiclass anatomic segmentation of RGB pediatric hip radiographs in Perthes disease
+  file_ending: .nii.gz
+
+channels:
+  0: R
+  1: G
+  2: B
+
+labels:
+  background: 0
+  acetabulum: 1
+  gt: 2
+  head: 3
+  lt: 4
+  neck: 5
+  shaft: 6
+  sourcil: 7
+  triradiate cartilage: 8
+
+training:
+  configuration: 2d
+  folds: [0, 1, 2, 3, 4]
+  epochs: 1000
+  device: cuda
+  save_npz: true
+  plans: nnUNetPlans
+  num_splits: 5
+  split_seed: 2026
+  patient_map: patient_groups.csv

@@ -1,0 +1,26 @@
+# Patient data, generated outputs, and weights
+dataset/
+outputs/
+scratch/
+.tmp_*/
+*.pt
+*.pth
+*.ckpt
+*.zip
+*.npz
+*.nii
+*.nii.gz
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.ipynb_checkpoints/
+
+# Local configuration and editor files
+.env
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
