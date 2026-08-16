@@ -1,12 +1,10 @@
-# PerthesMetrics Results
+# Results
 
-This directory is reserved for sanitized publication-style aggregate results reconstructed from the final patient-grouped model archive.
-
-Run:
+`training/nnunet2d/reports/` reproduces the repository training-metrics output from the existing E: logs. `segmentation/nnunet2d/` contains aggregate validation tables and 300-dpi PNG/PDF figures. No images, weights, case identifiers, or case-level metrics are included.
 
 ```bat
-python tools\build_publication_results.py ^
-  --model-zip <perthesmetrics_nnunet_model.zip>
+python training\analyze_training_metrics.py --model-dir E:\perthesmetrics\nnUNet_results\Dataset\nnUNetTrainer__nnUNetPlans__2d --output-dir results\training\nnunet2d\reports
+python tools\build_publication_results.py --model-zip E:\perthesmetrics\export\Dataset_nnUNetTrainer_nnUNetPlans_2d.zip
 ```
 
-Generated outputs belong under `results/segmentation/nnunet2d/`. Model weights, patient data, case identifiers, case-level predictions, and full nnU-Net validation summaries are intentionally excluded. Historical image-level cross-validation results must not be presented as the final patient-grouped paper evaluation.
+Confidence intervals are t-based intervals over five fold estimates; they are not patient-level intervals. The external test set remains unevaluated until predictions are compared with an independent reference standard.

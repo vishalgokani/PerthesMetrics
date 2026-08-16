@@ -1,0 +1,26 @@
+{
+  "dataset_name": "Dataset501_Glioblastoma",
+  "plans_name": "nnUNetPlans",
+  "configuration": "2d",
+  "patch_size": [
+    640,
+    1024
+  ],
+  "batch_size": 5,
+  "labels": {
+    "background": 0,
+    "acetabulum": 1,
+    "gt": 2,
+    "head": 3,
+    "lt": 4,
+    "neck": 5,
+    "shaft": 6,
+    "sourcil": 7,
+    "triradiate cartilage": 8
+  },
+  "channel_names": {
+    "0": "R",
+    "1": "G",
+    "2": "B"
+  }
+}

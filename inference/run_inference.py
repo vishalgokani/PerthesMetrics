@@ -20,7 +20,7 @@ DEFAULT_MODEL_FILENAME = "perthesmetrics_nnunet_model.zip"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run PerthesMetrics 2D nnU-Net inference.")
-    parser.add_argument("--data-dir", required=True, type=Path, help="Network folder containing imagesTs.")
+    parser.add_argument("--data-dir", required=True, type=Path, help="Read-only folder containing imagesTs.")
     parser.add_argument("--scratch-dir", required=True, type=Path, help="Disposable local SSD folder.")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--model-zip", type=Path)
@@ -28,6 +28,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-filename", default=DEFAULT_MODEL_FILENAME)
     parser.add_argument("--device", choices=("cuda", "cpu", "mps"), default="cuda")
     parser.add_argument("--gpu", help="Optional CUDA_VISIBLE_DEVICES value.")
+    parser.add_argument(
+        "--output-dir", type=Path,
+        default=Path(__file__).resolve().parents[1] / "results" / "inference" / "test",
+        help="Durable output directory (default: repository results/inference/test).",
+    )
     parser.add_argument("--keep-scratch", action="store_true")
     return parser.parse_args()
 
@@ -163,7 +168,9 @@ def main() -> int:
             "nnUNetv2_predict", "-d", dataset_id, "-i", str(local_input), "-o", str(predictions),
             "-f", *folds, "-tr", trainer, "-c", configuration, "-p", plans, "-device", args.device,
         ], env)
-        output = data_dir / "perthesmetrics_nnunet_results"
+        output = args.output_dir.resolve()
+        if output == data_dir or data_dir in output.parents:
+            raise ValueError("Output must be outside the read-only input data directory.")
         if output.exists():
             remove(output)
         output_predictions = output / "predictions"

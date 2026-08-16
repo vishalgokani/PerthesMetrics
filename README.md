@@ -62,10 +62,11 @@ Five-fold splits are made by patient, not by radiograph. All views, sides, and t
 python inference\run_inference.py ^
   --data-dir <network-inference-dir> ^
   --scratch-dir <local-scratch-dir> ^
-  --model-zip <perthesmetrics_nnunet_model.zip>
+  --model-zip <perthesmetrics_nnunet_model.zip> ^
+  --output-dir results\inference\test
 ```
 
-A Hugging Face model repository can be supplied with `--model-repo` instead. See [inference/README.md](inference/README.md).
+A Hugging Face model repository can be supplied with `--model-repo` instead. Input remains read-only. Overlay recoloring is a separate script; see [inference/README.md](inference/README.md).
 
 ## Model release and results
 

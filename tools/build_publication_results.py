@@ -6,6 +6,7 @@ import argparse
 import csv
 import json
 import shutil
+import statistics
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,13 @@ LABELS = {
     "1": "acetabulum", "2": "gt", "3": "head", "4": "lt", "5": "neck",
     "6": "shaft", "7": "sourcil", "8": "triradiate_cartilage",
 }
-ROOT = "Dataset001_PerthesMetrics/nnUNetTrainer__nnUNetPlans__2d/"
+
+
+def archive_root(names: set[str]) -> str:
+    candidates = sorted({name.split("fold_0/", 1)[0] for name in names if "fold_0/validation/summary.json" in name})
+    if len(candidates) != 1:
+        raise ValueError(f"Expected one nnU-Net model root; found {candidates}")
+    return candidates[0]
 
 
 def aggregate_summary(summary: dict[str, Any]) -> dict[str, Any]:
@@ -71,7 +78,23 @@ def plot_dice(path: Path, rows: list[dict[str, Any]]) -> None:
     axis.set_ylabel("Dice")
     axis.set_title("PerthesMetrics patient-grouped nnU-Net validation Dice")
     axis.legend(frameon=False, ncol=3, fontsize=8)
-    figure.tight_layout(); figure.savefig(path, dpi=180); plt.close(figure)
+    figure.tight_layout(); figure.savefig(path, dpi=300, bbox_inches="tight")
+    figure.savefig(path.with_suffix(".pdf"), bbox_inches="tight"); plt.close(figure)
+
+
+def cross_fold_statistics(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mean, sample SD, and t-based 95% CI across the five validation folds."""
+    output = []
+    t_975_df4 = 2.7764451051977987
+    fields = ["foreground_mean_dice", *[f"dice_{label}" for label in LABELS.values()]]
+    for field in fields:
+        values = [float(row[field]) for row in rows if row.get(field) is not None]
+        average = statistics.mean(values); sd = statistics.stdev(values)
+        margin = t_975_df4 * sd / len(values) ** 0.5
+        output.append({"region": field.removeprefix("dice_").replace("_", " "), "n_folds": len(values),
+                       "mean_dice": average, "sd": sd, "ci95_low": max(0.0, average-margin),
+                       "ci95_high": min(1.0, average+margin)})
+    return output
 
 
 def main() -> int:
@@ -87,6 +110,7 @@ def main() -> int:
     all_metrics: list[dict[str, Any]] = []
     with zipfile.ZipFile(args.model_zip.resolve()) as archive:
         names = set(archive.namelist())
+        ROOT = archive_root(names)
         dataset = json.loads(archive.read(ROOT + "dataset.json"))
         plans = json.loads(archive.read(ROOT + "plans.json"))
         write_json(destination / "dataset.json", dataset)
@@ -123,6 +147,9 @@ def main() -> int:
     dice_fields = ["fold", "foreground_mean_dice", *[f"dice_{label}" for label in LABELS.values()]]
     write_csv(destination / "fold_validation_dice_summary.csv", fold_rows, dice_fields)
     write_csv(destination / "all_fold_validation_summary_metrics.csv", all_metrics, ["fold", "scope", "label", "metric", "value"])
+    statistics_rows = cross_fold_statistics(fold_rows[:5])
+    write_csv(destination / "cross_fold_dice_statistics.csv", statistics_rows,
+              ["region", "n_folds", "mean_dice", "sd", "ci95_low", "ci95_high"])
     plot_dice(destination / "validation_dice_summary.png", fold_rows)
     print(f"Wrote sanitized aggregate results to: {destination}")
     return 0
