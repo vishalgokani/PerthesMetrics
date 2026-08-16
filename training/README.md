@@ -21,4 +21,6 @@ python training\train_nnunet2d.py ^
 
 Patient-grouped folds are inferred from the required `Patient_<numeric_id>...` filename prefix. All views, sides, and time points sharing that ID remain in one fold. An explicit complete `patient_groups.csv` is also supported.
 
-After training, the complete package is copied to `<data_dir>/perthesmetrics_nnunet_model/`, including `export/perthesmetrics_nnunet_model.zip`, split audits, reports, and model files. No training masks are copied back. Scratch is deleted after success; use `--resume` with the same path after interruption.
+After training, the complete package is copied to `<data_dir>/perthesmetrics_nnunet_model/`, including `export/perthesmetrics_nnunet_model.zip`, split audits, reports, and model files. No training masks are copied back.
+
+Rerunning with the same `--scratch-dir` automatically reuses complete staged NIfTI data and preprocessing. Existing fold checkpoints are resumed; a fold without a checkpoint starts normally. Use `--rebuild-scratch` only when staged data must be deleted and regenerated. Successful training deletes scratch unless `--keep-scratch` is supplied.

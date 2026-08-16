@@ -51,6 +51,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", choices=("cuda", "cpu", "mps"))
     parser.add_argument("--gpu", help="Optional CUDA_VISIBLE_DEVICES value, for example 0.")
     parser.add_argument("--resume", action="store_true", help="Resume checkpoints in the same scratch directory.")
+    parser.add_argument(
+        "--rebuild-scratch", action="store_true",
+        help="Delete and rebuild staged/preprocessed scratch data instead of reusing it.",
+    )
     parser.add_argument("--skip-planning", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--skip-training", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--keep-scratch", action="store_true", help="Keep scratch after successful completion.")
@@ -84,14 +88,46 @@ def remove(path: Path) -> None:
         shutil.rmtree(path)
 
 
-def prepare_scratch(path: Path, resume: bool) -> Path:
+def prepare_scratch(path: Path, preserve: bool) -> Path:
     path = path.resolve()
     if path.anchor == str(path):
         raise ValueError(f"Refusing to use filesystem root as scratch: {path}")
-    if path.exists() and not resume:
+    if path.exists() and not preserve:
         remove(path)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def staged_dataset_exists(scratch: Path, config: dict) -> bool:
+    target = scratch.resolve() / "nnUNet_raw" / dataset_folder(config)
+    return all((target / name).is_dir() for name in ("imagesTr", "labelsTr")) and (target / "dataset.json").is_file()
+
+
+def checkpoint_exists(scratch: Path, config: dict, trainer: str, fold: int) -> bool:
+    fold_dir = (
+        scratch / "nnUNet_results" / dataset_folder(config) /
+        f"{trainer}__nnUNetPlans__2d" / f"fold_{fold}"
+    )
+    return any((fold_dir / name).is_file() for name in ("checkpoint_latest.pth", "checkpoint_final.pth"))
+
+
+def validate_device(device: str) -> None:
+    if device != "cuda":
+        return
+    try:
+        import torch
+    except ImportError as error:
+        raise RuntimeError("CUDA training requires PyTorch in the active environment.") from error
+    if torch.version.cuda is None:
+        raise RuntimeError(
+            f"The active PyTorch build ({torch.__version__}) has no CUDA support. "
+            "Install a CUDA-enabled PyTorch build in this environment, then rerun the same command."
+        )
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            f"PyTorch was built for CUDA {torch.version.cuda}, but no CUDA device is available. "
+            "Check the NVIDIA driver and CUDA_VISIBLE_DEVICES."
+        )
 
 
 def discover_cases(data_dir: Path) -> list[str]:
@@ -200,9 +236,6 @@ def copy_outputs(data_dir: Path, scratch: Path, config: dict, trainer: str, fold
     conversion_manifest = scratch / "nnUNet_raw" / dataset_folder(config) / "input_conversion_manifest.csv"
     if conversion_manifest.is_file():
         shutil.copy2(conversion_manifest, destination / conversion_manifest.name)
-    conversion_manifest = scratch / "nnUNet_raw" / dataset_folder(config) / "input_conversion_manifest.csv"
-    if conversion_manifest.is_file():
-        shutil.copy2(conversion_manifest, destination / conversion_manifest.name)
     model_zip = destination / "export" / "perthesmetrics_nnunet_model.zip"
     manifest = {
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -229,13 +262,21 @@ def main() -> int:
         raise ValueError(f"Unsupported epoch count. Choose one of: {sorted(EPOCH_TRAINERS)}")
     trainer = EPOCH_TRAINERS[epochs]
     device = args.device or training.get("device", "cuda")
+    if args.resume and args.rebuild_scratch:
+        raise ValueError("--resume and --rebuild-scratch cannot be used together.")
+    if args.gpu is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    validate_device(device)
     data_dir = args.data_dir.resolve()
     if not data_dir.is_dir():
         raise FileNotFoundError(data_dir)
-    scratch = prepare_scratch(args.scratch_dir, args.resume)
+    scratch_path = args.scratch_dir.resolve()
+    reuse_staged = not args.rebuild_scratch and staged_dataset_exists(scratch_path, config)
+    preserve_scratch = args.resume or reuse_staged
+    scratch = prepare_scratch(scratch_path, preserve_scratch)
     completed = False
     try:
-        _, cases = stage_data(data_dir, scratch, config, args.resume)
+        _, cases = stage_data(data_dir, scratch, config, preserve_scratch)
         map_path = args.patient_map.resolve() if args.patient_map else data_dir / training.get("patient_map", "patient_groups.csv")
         case_to_patient = resolve_groups(cases, load_patient_map(map_path if map_path.is_file() else None))
         splits, patient_to_fold = make_grouped_splits(case_to_patient, num_splits, int(training.get("split_seed", 2026)))
@@ -250,8 +291,10 @@ def main() -> int:
         dataset_id = str(int(config["dataset"]["id"]))
         preprocessed = scratch / "nnUNet_preprocessed" / dataset_folder(config)
         plans_file = preprocessed / "nnUNetPlans.json"
-        if not args.skip_planning and not (args.resume and plans_file.is_file()):
+        if not args.skip_planning and not plans_file.is_file():
             run(["nnUNetv2_plan_and_preprocess", "-d", dataset_id, "-c", "2d", "--verify_dataset_integrity"], env)
+        elif plans_file.is_file():
+            print(f"Reusing completed preprocessing in {preprocessed}")
         if not plans_file.is_file() and not args.skip_planning:
             raise FileNotFoundError(f"Preprocessing did not produce {plans_file}")
         write_split_artifacts(preprocessed, splits, case_to_patient, patient_to_fold, int(training.get("split_seed", 2026)))
@@ -261,7 +304,8 @@ def main() -> int:
                 command = ["nnUNetv2_train", dataset_id, "2d", str(fold), "-tr", trainer, "-p", "nnUNetPlans", "-device", device]
                 if bool(training.get("save_npz", True)):
                     command.append("--npz")
-                if args.resume:
+                if checkpoint_exists(scratch, config, trainer, fold):
+                    print(f"Resuming fold {fold} from its existing checkpoint.")
                     command.append("--c")
                 run(command, env)
             model_dir = scratch / "nnUNet_results" / dataset_folder(config) / f"{trainer}__nnUNetPlans__2d"

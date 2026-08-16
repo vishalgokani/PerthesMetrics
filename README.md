@@ -35,16 +35,14 @@ No patient data or model weights are committed. Keep source data on a network dr
 
 ## Environment
 
-From an Anaconda Prompt or command prompt:
+From an Anaconda Prompt, create the pinned CUDA environment:
 
 ```bat
-conda create -n perthesmetrics python=3.12 -y
+conda env create -f training\environment.yml
 conda activate perthesmetrics
-python -m pip install -r training\requirements.txt
-python -m pip install -r inference\requirements.txt
 ```
 
-The tested reference environment is Python 3.12, PyTorch 2.5.1 with CUDA 12.4, and nnU-Net v2.5.1. Install the PyTorch build appropriate for your machine before running GPU workloads if `pip` does not select it correctly.
+The reference environment uses Python 3.12, PyTorch 2.5.1 with CUDA 12.4, and nnU-Net v2.5.1. The training script checks CUDA support before touching scratch data and reports an actionable error if a CPU-only PyTorch build is active.
 
 ## Train
 
