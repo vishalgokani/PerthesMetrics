@@ -1,24 +1,24 @@
 # Training
 
-The input folder must contain `imagesTr/<case>_0000.nii.gz`, `_0001`, `_0002`, and `labelsTr/<case>.nii.gz`. Provide `patient_groups.csv` (`case_id,patient_id`) so every radiograph from one patient stays in one fold.
+Run commands from the repository root:
+
+```bat
+cd /d <github_repo_location>
+```
+
+The input directory contains radiograph BMPs at its root and eight matching binary-mask directories under `masks/`. During local staging, every radiograph is converted into RGB `_0000`, `_0001`, and `_0002` NIfTI channels and the class masks are merged into one multiclass `labelsTr` NIfTI file.
 
 ```bat
 conda env create -f training\environment.yml
 conda activate perthesmetrics
 python training\train_nnunet2d.py ^
-  --data-dir <dataset-dir> ^
-  --scratch-dir C:\perthesmetrics_scratch\training ^
+  --data-dir <data_dir> ^
+  --scratch-dir <scratch_dir> ^
   --folds 0 1 2 3 4 ^
   --epochs 1000 ^
   --device cuda
 ```
 
-The workflow validates and stages data, creates patient-grouped folds, trains nnU-Net 2D, creates per-fold epoch CSVs/curves and a cross-fold summary, exports the model, copies outputs to `<dataset-dir>/perthesmetrics_nnunet_model`, and deletes scratch after success. Use `--resume` with the same scratch path after interruption.
+Patient-grouped folds are inferred from the required `Patient_<numeric_id>...` filename prefix. All views, sides, and time points sharing that ID remain in one fold. An explicit complete `patient_groups.csv` is also supported.
 
-Rebuild only the reports from existing logs:
-
-```bat
-python training\analyze_training_metrics.py ^
-  --model-dir E:\perthesmetrics\nnUNet_results\Dataset\nnUNetTrainer__nnUNetPlans__2d ^
-  --output-dir C:\Users\gokan\Documents\GitHub\PerthesMetrics\results\training\nnunet2d\reports
-```
+After training, the complete package is copied to `<data_dir>/perthesmetrics_nnunet_model/`, including `export/perthesmetrics_nnunet_model.zip`, split audits, reports, and model files. No training masks are copied back. Scratch is deleted after success; use `--resume` with the same path after interruption.

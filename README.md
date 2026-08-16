@@ -2,6 +2,12 @@
 
 Reproducible 2D nnU-Net v2 training, inference, model-release, and publication-results tools for multiclass segmentation of pediatric hip radiographs in Legg-Calve-Perthes disease.
 
+Run all commands from the repository root:
+
+```bat
+cd /d <github_repo_location>
+```
+
 The model uses RGB radiographs represented as three nnU-Net channels and predicts eight anatomic regions:
 
 | Value | Region |
@@ -32,7 +38,6 @@ No patient data or model weights are committed. Keep source data on a network dr
 From an Anaconda Prompt or command prompt:
 
 ```bat
-cd /d <repo-dir>
 conda create -n perthesmetrics python=3.12 -y
 conda activate perthesmetrics
 python -m pip install -r training\requirements.txt
@@ -43,12 +48,12 @@ The tested reference environment is Python 3.12, PyTorch 2.5.1 with CUDA 12.4, a
 
 ## Train
 
-The training dataset must contain `imagesTr` and `labelsTr`. `imagesTs` and `labelsTs` are optional. Each RGB case is stored as three NIfTI files ending in `_0000`, `_0001`, and `_0002`.
+Training accepts root BMP radiographs plus one matching BMP per class under `masks/<class>/`. They are converted in local scratch to three RGB NIfTI channels and one multiclass label per case.
 
 ```bat
 python training\train_nnunet2d.py ^
-  --data-dir <network-dataset-dir> ^
-  --scratch-dir <local-scratch-dir> ^
+  --data-dir <data_dir> ^
+  --scratch-dir <scratch_dir> ^
   --folds 0 1 2 3 4 ^
   --epochs 1000 ^
   --device cuda
@@ -60,13 +65,12 @@ Five-fold splits are made by patient, not by radiograph. All views, sides, and t
 
 ```bat
 python inference\run_inference.py ^
-  --data-dir <network-inference-dir> ^
-  --scratch-dir <local-scratch-dir> ^
-  --model-zip <perthesmetrics_nnunet_model.zip> ^
-  --output-dir results\inference\test
+  --data-dir <data_dir> ^
+  --scratch-dir <scratch_dir> ^
+  --model-zip <model_zip>
 ```
 
-A Hugging Face model repository can be supplied with `--model-repo` instead. Input remains read-only. Overlay recoloring is a separate script; see [inference/README.md](inference/README.md).
+A Hugging Face model repository can be supplied with `--model-repo` instead. Inference converts BMPs to NIfTI in scratch and exports one binary BMP per predicted class to `<data_dir>/nnunet_masks` by default. Overlay recoloring remains a separate script; see [inference/README.md](inference/README.md).
 
 ## Model release and results
 

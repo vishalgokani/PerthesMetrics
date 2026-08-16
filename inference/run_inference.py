@@ -14,13 +14,19 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from perthesmetrics_io import LABELS, export_prediction_bmps, stage_bmp_inference_data
+
 
 DEFAULT_MODEL_FILENAME = "perthesmetrics_nnunet_model.zip"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run PerthesMetrics 2D nnU-Net inference.")
-    parser.add_argument("--data-dir", required=True, type=Path, help="Read-only folder containing imagesTs.")
+    parser.add_argument("--data-dir", required=True, type=Path, help="Folder containing root radiograph BMP files.")
     parser.add_argument("--scratch-dir", required=True, type=Path, help="Disposable local SSD folder.")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--model-zip", type=Path)
@@ -30,8 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu", help="Optional CUDA_VISIBLE_DEVICES value.")
     parser.add_argument(
         "--output-dir", type=Path,
-        default=Path(__file__).resolve().parents[1] / "results" / "inference" / "test",
-        help="Durable output directory (default: repository results/inference/test).",
+        help="Output folder (default: <data-dir>/nnunet_masks). Must not already exist.",
     )
     parser.add_argument("--keep-scratch", action="store_true")
     return parser.parse_args()
@@ -140,7 +145,11 @@ def install_model(model_zip: Path, env: dict[str, str]) -> tuple[str, Path, list
 def main() -> int:
     args = parse_args()
     data_dir = args.data_dir.resolve()
-    cases = discover_cases(data_dir / "imagesTs")
+    if not data_dir.is_dir():
+        raise FileNotFoundError(data_dir)
+    output = args.output_dir.resolve() if args.output_dir else data_dir / "nnunet_masks"
+    if output.exists():
+        raise FileExistsError(f"Refusing to replace existing output: {output}. Choose a new --output-dir.")
     scratch = prepare_scratch(args.scratch_dir)
     completed = False
     try:
@@ -154,45 +163,32 @@ def main() -> int:
             Path(env[key]).mkdir(parents=True)
         if args.gpu is not None:
             env["CUDA_VISIBLE_DEVICES"] = args.gpu
+        local_input = scratch / "input" / "imagesTs"
+        case_to_filename = stage_bmp_inference_data(data_dir, local_input)
         model_zip = get_model(args, scratch)
         model_hash = sha256(model_zip)
         dataset_id, model_folder, folds = install_model(model_zip, env)
         trainer, plans, configuration = model_folder.name.split("__")
-        local_input = scratch / "input" / "imagesTs"
-        local_input.mkdir(parents=True)
-        for files in cases.values():
-            for source in files:
-                shutil.copy2(source, local_input / source.name)
         predictions = scratch / "predictions"
         run([
             "nnUNetv2_predict", "-d", dataset_id, "-i", str(local_input), "-o", str(predictions),
             "-f", *folds, "-tr", trainer, "-c", configuration, "-p", plans, "-device", args.device,
         ], env)
-        output = args.output_dir.resolve()
-        if output == data_dir or data_dir in output.parents:
-            raise ValueError("Output must be outside the read-only input data directory.")
-        if output.exists():
-            remove(output)
-        output_predictions = output / "predictions"
-        output_predictions.mkdir(parents=True)
-        rows = []
-        for prediction in sorted(predictions.glob("*.nii.gz")):
-            destination = output_predictions / prediction.name
-            shutil.copy2(prediction, destination)
-            rows.append({"case_id": prediction.name.removesuffix(".nii.gz"), "prediction": f"predictions/{prediction.name}"})
-        if len(rows) != len(cases):
-            raise RuntimeError(f"Expected {len(cases)} predictions, produced {len(rows)}.")
-        with (output / "inference_manifest.csv").open("w", newline="", encoding="utf-8") as stream:
-            writer = csv.DictWriter(stream, fieldnames=["case_id", "prediction"])
+        rendered = scratch / "rendered_masks"
+        rows = export_prediction_bmps(predictions, rendered, case_to_filename, LABELS)
+        with (rendered / "inference_manifest.csv").open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=["case_id", "source_filename"])
             writer.writeheader(); writer.writerows(rows)
         manifest = {
-            "created_utc": datetime.now(timezone.utc).isoformat(), "num_cases": len(cases),
+            "created_utc": datetime.now(timezone.utc).isoformat(), "num_cases": len(case_to_filename),
             "model_sha256": model_hash, "installed_model": model_folder.name, "folds": folds,
             "configuration": configuration, "device": args.device,
-            "labels": {"0": "background", "1": "acetabulum", "2": "gt", "3": "head", "4": "lt", "5": "neck", "6": "shaft", "7": "sourcil", "8": "triradiate cartilage"},
+            "labels": {str(value): name for name, value in LABELS.items()},
+            "output_format": "one binary BMP per foreground class and source radiograph",
         }
-        (output / "inference_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        print(f"Copied {len(rows)} predictions to: {output}")
+        (rendered / "inference_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        shutil.copytree(rendered, output)
+        print(f"Copied {len(rows)} predictions as class BMP masks to: {output}")
         completed = True
     finally:
         if scratch.exists() and completed and not args.keep_scratch:

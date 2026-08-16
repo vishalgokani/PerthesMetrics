@@ -4,19 +4,14 @@ from __future__ import annotations
 
 import argparse
 import csv
-import re
+import sys
 from pathlib import Path
 
-import nibabel as nib
-import numpy as np
-from PIL import Image
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-
-def safe_case_id(path: Path) -> str:
-    value = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem).strip("._-")
-    if not value:
-        raise ValueError(f"Cannot create a case ID for {path}")
-    return value
+from perthesmetrics_io import IMAGE_EXTENSIONS, safe_case_id, write_rgb_nifti
 
 
 def main() -> int:
@@ -29,26 +24,18 @@ def main() -> int:
     if not input_dir.is_dir():
         raise FileNotFoundError(input_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    extensions = {".png", ".bmp", ".jpg", ".jpeg", ".tif", ".tiff"}
     candidates = input_dir.rglob("*") if args.recursive else input_dir.glob("*")
-    images = sorted(path for path in candidates if path.is_file() and path.suffix.lower() in extensions)
+    images = sorted(path for path in candidates if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS)
     if not images:
         raise FileNotFoundError(f"No supported images found in {input_dir}")
     used: set[str] = set()
     manifest = []
-    affine = np.diag([999.0, 1.0, 1.0, 1.0])
     for source in images:
         case = safe_case_id(source)
         if case in used:
             raise ValueError(f"Duplicate case ID '{case}'. Rename source files to unique stems.")
         used.add(case)
-        rgb = np.asarray(Image.open(source).convert("RGB"), dtype=np.uint8)
-        for channel in range(3):
-            # Match the historical model representation: a singleton through-plane
-            # dimension with large spacing, while nnU-Net operates in 2D.
-            data = rgb[:, :, channel][None, :, :]
-            destination = output_dir / f"{case}_{channel:04d}.nii.gz"
-            nib.save(nib.Nifti1Image(data, affine), destination)
+        write_rgb_nifti(source, output_dir, case)
         manifest.append({"case_id": case, "source": source.relative_to(input_dir).as_posix()})
     with (output_dir.parent / "input_conversion_manifest.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=["case_id", "source"])

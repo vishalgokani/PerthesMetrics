@@ -13,23 +13,16 @@ from pathlib import Path
 def infer_patient_id(case_id: str) -> str:
     """Infer a stable patient ID from supported PerthesMetrics case names.
 
-    Synthetic examples: ``Patient_1001_AP_...`` and ``1001_Frog_...`` both
-    map to ``1001``; ``X013_L_...`` maps to ``X013``. An explicit patient map is preferred when
-    filenames do not follow these conventions.
+    Case names must begin with ``Patient_<numeric-id>``. An explicit complete
+    patient map may be used when filenames do not follow this convention.
     """
     value = case_id.strip()
     match = re.match(r"(?i)^patient[_ -]*0*(\d+)(?:[_ -]|$)", value)
     if match:
         return str(int(match.group(1)))
-    match = re.match(r"^0*(\d+)(?:[_ -]|$)", value)
-    if match:
-        return str(int(match.group(1)))
-    match = re.match(r"(?i)^([A-Z]+)0*(\d+)(?:[_ -]|$)", value)
-    if match:
-        return f"{match.group(1).upper()}{int(match.group(2)):03d}"
     raise ValueError(
-        f"Cannot infer patient ID from case '{case_id}'. Add it to patient_groups.csv "
-        "with columns case_id,patient_id."
+        f"Case '{case_id}' must start with Patient_<numeric-id>, or be included "
+        "in a complete patient_groups.csv with columns case_id,patient_id."
     )
 
 

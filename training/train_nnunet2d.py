@@ -16,6 +16,12 @@ from pathlib import Path
 
 import yaml
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from perthesmetrics_io import stage_bmp_training_data
+
 try:
     from .patient_splits import load_patient_map, make_grouped_splits, resolve_groups, write_split_artifacts
 except ImportError:  # Direct execution: python training/train_nnunet2d.py
@@ -34,7 +40,10 @@ EPOCH_TRAINERS = {
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the PerthesMetrics 2D nnU-Net with patient-grouped folds.")
     parser.add_argument("--config", type=Path, default=Path(__file__).with_name("perthesmetrics_nnunet2d.yaml"))
-    parser.add_argument("--data-dir", required=True, type=Path, help="Network folder containing imagesTr and labelsTr.")
+    parser.add_argument(
+        "--data-dir", required=True, type=Path,
+        help="Folder containing root radiograph BMPs and masks/<class> BMPs (or prepared imagesTr/labelsTr).",
+    )
     parser.add_argument("--scratch-dir", required=True, type=Path, help="Disposable local SSD folder.")
     parser.add_argument("--patient-map", type=Path, help="Optional CSV with case_id,patient_id columns.")
     parser.add_argument("--folds", nargs="+", type=int)
@@ -116,16 +125,24 @@ def discover_cases(data_dir: Path) -> list[str]:
     return cases
 
 
-def stage_data(data_dir: Path, scratch: Path, config: dict, resume: bool) -> Path:
+def stage_data(data_dir: Path, scratch: Path, config: dict, resume: bool) -> tuple[Path, list[str]]:
     target = scratch / "nnUNet_raw" / dataset_folder(config)
     target.mkdir(parents=True, exist_ok=True)
-    for name in ("imagesTr", "labelsTr", "imagesTs", "labelsTs"):
-        source, destination = data_dir / name, target / name
-        if source.is_dir() and not destination.exists():
-            print(f"Copying {source} -> {destination}")
-            shutil.copytree(source, destination)
-        elif name in ("imagesTr", "labelsTr") and not destination.is_dir():
-            raise FileNotFoundError(f"Required folder not found: {source}")
+    if (data_dir / "imagesTr").is_dir() and (data_dir / "labelsTr").is_dir():
+        for name in ("imagesTr", "labelsTr", "imagesTs", "labelsTs"):
+            source, destination = data_dir / name, target / name
+            if source.is_dir() and not destination.exists():
+                print(f"Copying {source} -> {destination}")
+                shutil.copytree(source, destination)
+        cases = discover_cases(target)
+    elif resume and (target / "imagesTr").is_dir() and (target / "labelsTr").is_dir():
+        print(f"Reusing staged NIfTI training data in {target}")
+        cases = discover_cases(target)
+    else:
+        if not (data_dir / "masks").is_dir():
+            raise FileNotFoundError(f"Required class-mask folder not found: {data_dir / 'masks'}")
+        print(f"Converting BMP radiographs and class masks to nnU-Net NIfTI in {target}")
+        cases = stage_bmp_training_data(data_dir, target, config["labels"])
     payload = {
         "channel_names": {str(key): value for key, value in config["channels"].items()},
         "labels": config["labels"],
@@ -135,7 +152,7 @@ def stage_data(data_dir: Path, scratch: Path, config: dict, resume: bool) -> Pat
         "description": config["dataset"]["description"],
     }
     (target / "dataset.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    return target
+    return target, cases
 
 
 def executable(name: str) -> str:
@@ -180,6 +197,12 @@ def copy_outputs(data_dir: Path, scratch: Path, config: dict, trainer: str, fold
     split_dir = scratch / "nnUNet_preprocessed" / dataset_folder(config)
     for name in ("splits_final.json", "patient_split_audit.json", "patient_fold_assignments.csv"):
         shutil.copy2(split_dir / name, destination / name)
+    conversion_manifest = scratch / "nnUNet_raw" / dataset_folder(config) / "input_conversion_manifest.csv"
+    if conversion_manifest.is_file():
+        shutil.copy2(conversion_manifest, destination / conversion_manifest.name)
+    conversion_manifest = scratch / "nnUNet_raw" / dataset_folder(config) / "input_conversion_manifest.csv"
+    if conversion_manifest.is_file():
+        shutil.copy2(conversion_manifest, destination / conversion_manifest.name)
     model_zip = destination / "export" / "perthesmetrics_nnunet_model.zip"
     manifest = {
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -209,14 +232,13 @@ def main() -> int:
     data_dir = args.data_dir.resolve()
     if not data_dir.is_dir():
         raise FileNotFoundError(data_dir)
-    cases = discover_cases(data_dir)
-    map_path = args.patient_map.resolve() if args.patient_map else data_dir / training.get("patient_map", "patient_groups.csv")
-    case_to_patient = resolve_groups(cases, load_patient_map(map_path if map_path.is_file() else None))
-    splits, patient_to_fold = make_grouped_splits(case_to_patient, num_splits, int(training.get("split_seed", 2026)))
     scratch = prepare_scratch(args.scratch_dir, args.resume)
     completed = False
     try:
-        stage_data(data_dir, scratch, config, args.resume)
+        _, cases = stage_data(data_dir, scratch, config, args.resume)
+        map_path = args.patient_map.resolve() if args.patient_map else data_dir / training.get("patient_map", "patient_groups.csv")
+        case_to_patient = resolve_groups(cases, load_patient_map(map_path if map_path.is_file() else None))
+        splits, patient_to_fold = make_grouped_splits(case_to_patient, num_splits, int(training.get("split_seed", 2026)))
         env = os.environ.copy()
         env.update({
             "nnUNet_raw": str(scratch / "nnUNet_raw"),

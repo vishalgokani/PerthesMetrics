@@ -1,26 +1,31 @@
 # Inference
 
+Run commands from the repository root:
+
+```bat
+cd /d <github_repo_location>
+```
+
 ```bat
 conda env create -f inference\environment.yml
 conda activate perthesmetrics
 python inference\run_inference.py ^
-  --data-dir E:\perthesmetrics\nnUNet_raw\Dataset ^
-  --scratch-dir C:\perthesmetrics_scratch\inference ^
-  --model-zip E:\perthesmetrics\export\Dataset_nnUNetTrainer_nnUNetPlans_2d.zip ^
-  --output-dir C:\Users\gokan\Documents\GitHub\PerthesMetrics\results\inference\test ^
+  --data-dir <data_dir> ^
+  --scratch-dir <scratch_dir> ^
+  --model-zip <model_zip> ^
   --device cuda
 ```
 
-Input is read-only. Each `imagesTs` case must have `_0000`, `_0001`, and `_0002` NIfTI channels. Successful inference writes predictions and CSV/JSON manifests to `--output-dir` and deletes scratch. Add `--gpu 0` to select a GPU or use `--device cpu`.
+Root BMP radiographs are converted to three-channel NIfTI only in local scratch. Predictions are converted back into eight class directories of binary BMP files under `<data_dir>/nnunet_masks` by default, using the original filenames. The output directory must not already exist. Scratch is deleted after success. Add `--gpu 0` to select a GPU, `--output-dir` to select another destination, or `--device cpu` for CPU inference.
 
 Figure recoloring is separate from inference. Edit `OPACITY` and `COLORS` in `generate_figures.py`, or pass `--opacity`:
 
 ```bat
 python inference\generate_figures.py ^
-  --source-dir E:\perthesmetrics\lcpd_radiograph_data_for_perthesmetrics\final_dataset\all_radiographs\test\test ^
-  --predictions-dir C:\Users\gokan\Documents\GitHub\PerthesMetrics\results\inference\test\predictions ^
-  --output-dir E:\perthesmetrics\lcpd_radiograph_data_for_perthesmetrics\final_dataset\all_radiographs\test\test\figures ^
+  --source-dir <data_dir> ^
+  --predictions-dir <predictions_dir> ^
+  --output-dir <figures_dir> ^
   --opacity 0.45
 ```
 
-The figure command writes to E: only when explicitly run; it is not part of inference.
+Run inference with `--keep-scratch` when NIfTI predictions are needed for figures. The figure command is not part of inference.
