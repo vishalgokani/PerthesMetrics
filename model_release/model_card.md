@@ -6,7 +6,7 @@ PerthesMetrics is a 2D nnU-Net v2 model for multiclass anatomic segmentation of 
 
 ## Inputs
 
-Each RGB radiograph is represented as three aligned NIfTI channels.
+Each radiograph is uploaded in NIFTI format.
 
 ## Outputs
 
