@@ -22,6 +22,7 @@ from perthesmetrics_io import LABELS, export_prediction_bmps, stage_bmp_inferenc
 
 
 DEFAULT_MODEL_FILENAME = "perthesmetrics_nnunet_model.zip"
+DEFAULT_MODEL_REPO = "vishalgokani/perthesmetrics-nnunet"
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,10 +30,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", required=True, type=Path, help="Folder containing root radiograph BMP files.")
     parser.add_argument("--scratch-dir", required=True, type=Path, help="Disposable local SSD folder.")
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--model-zip", type=Path)
-    source.add_argument("--model-repo", help="Hugging Face model repository ID.")
+    source.add_argument("--model-zip", type=Path, help="Path to a local nnU-Net model export zip.")
+    source.add_argument(
+        "--model-repo",
+        help=f"Hugging Face model repository ID (released model: {DEFAULT_MODEL_REPO}).",
+    )
     parser.add_argument("--model-filename", default=DEFAULT_MODEL_FILENAME)
-    parser.add_argument("--device", choices=("cuda", "cpu", "mps"), default="cuda")
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cuda", "cpu", "mps"),
+        default="auto",
+        help="Inference device (default: auto selects CUDA when usable, otherwise CPU).",
+    )
     parser.add_argument("--gpu", help="Optional CUDA_VISIBLE_DEVICES value.")
     parser.add_argument(
         "--output-dir", type=Path,
@@ -60,16 +69,26 @@ def prepare_scratch(path: Path) -> Path:
 
 
 def executable(name: str) -> str:
-    found = shutil.which(name)
-    if found:
-        return found
-    candidate = Path(sys.executable).resolve().parent / "Scripts" / f"{name}.exe"
-    return str(candidate) if candidate.is_file() else name
+    # Always prefer entry points installed beside the Python interpreter that
+    # is running this script. PATH may contain nnU-Net from another Conda/venv
+    # whose PyTorch build is CPU-only.
+    prefix = Path(sys.prefix).resolve()
+    candidates = (
+        prefix / "Scripts" / f"{name}.exe",  # Windows Conda/venv
+        prefix / "Scripts" / name,
+        prefix / "bin" / name,               # POSIX Conda/venv
+        Path(sys.executable).resolve().parent / f"{name}.exe",
+        Path(sys.executable).resolve().parent / name,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return shutil.which(name) or name
 
 
 def run(command: list[str], env: dict[str, str]) -> None:
     command = [executable(command[0]), *command[1:]]
-    print("\n" + " ".join(f'"{part}"' if " " in part else part for part in command))
+    print("\n" + " ".join(f'"{part}"' if " " in part else part for part in command), flush=True)
     subprocess.run(command, env=env, check=True)
 
 
@@ -108,6 +127,59 @@ def get_model(args: argparse.Namespace, scratch: Path) -> Path:
     return destination
 
 
+def resolve_device(device: str, gpu: str | None) -> str:
+    if device in ("cpu", "mps"):
+        print(f"Inference device: {device}", flush=True)
+        return device
+    if gpu is not None:
+        # Set this before importing torch so the validation and nnU-Net child
+        # process see the same physical GPU selection.
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu
+    try:
+        import torch
+    except ImportError as error:
+        if device == "auto":
+            print("CUDA unavailable because PyTorch is not installed; using CPU inference.", flush=True)
+            return "cpu"
+        raise RuntimeError(
+            "CUDA inference requires PyTorch. Install a CUDA-compatible PyTorch build before "
+            "installing inference/requirements.txt."
+        ) from error
+    if not torch.cuda.is_available():
+        if device == "auto":
+            print("CUDA is not available to PyTorch; using CPU inference.", flush=True)
+            return "cpu"
+        raise RuntimeError(
+            "--device cuda was requested, but this PyTorch installation cannot access CUDA. "
+            "Install the CUDA-compatible PyTorch build for this system or use --device cpu."
+        )
+    try:
+        probe = torch.empty(1, device="cuda")
+        torch.cuda.synchronize()
+        del probe
+    except Exception as error:
+        if device == "auto":
+            print(f"CUDA could not be initialized ({error}); using CPU inference.", flush=True)
+            return "cpu"
+        raise RuntimeError(
+            "PyTorch reports CUDA support, but a CUDA tensor could not be allocated. "
+            "Check the NVIDIA driver, CUDA/PyTorch compatibility, and --gpu selection."
+        ) from error
+    index = torch.cuda.current_device()
+    selected = f"; CUDA_VISIBLE_DEVICES={gpu}" if gpu is not None else ""
+    print(
+        f"CUDA inference verified: {torch.cuda.get_device_name(index)} "
+        f"(logical cuda:{index}; PyTorch {torch.__version__}; CUDA {torch.version.cuda}{selected})",
+        flush=True,
+    )
+    print(
+        "nnU-Net preprocessing and mask export use CPU by design; neural-network "
+        "prediction and sliding-window accumulation will use CUDA.",
+        flush=True,
+    )
+    return "cuda"
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -144,6 +216,7 @@ def install_model(model_zip: Path, env: dict[str, str]) -> tuple[str, Path, list
 
 def main() -> int:
     args = parse_args()
+    device = resolve_device(args.device, args.gpu)
     data_dir = args.data_dir.resolve()
     if not data_dir.is_dir():
         raise FileNotFoundError(data_dir)
@@ -172,7 +245,7 @@ def main() -> int:
         predictions = scratch / "predictions"
         run([
             "nnUNetv2_predict", "-d", dataset_id, "-i", str(local_input), "-o", str(predictions),
-            "-f", *folds, "-tr", trainer, "-c", configuration, "-p", plans, "-device", args.device,
+            "-f", *folds, "-tr", trainer, "-c", configuration, "-p", plans, "-device", device,
         ], env)
         rendered = scratch / "rendered_masks"
         rows = export_prediction_bmps(predictions, rendered, case_to_filename, LABELS)
@@ -182,7 +255,7 @@ def main() -> int:
         manifest = {
             "created_utc": datetime.now(timezone.utc).isoformat(), "num_cases": len(case_to_filename),
             "model_sha256": model_hash, "installed_model": model_folder.name, "folds": folds,
-            "configuration": configuration, "device": args.device,
+            "configuration": configuration, "device": device, "requested_device": args.device,
             "labels": {str(value): name for name, value in LABELS.items()},
             "output_format": "one binary BMP per foreground class and source radiograph",
         }

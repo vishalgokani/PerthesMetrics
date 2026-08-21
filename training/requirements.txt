@@ -1,3 +1,4 @@
+# Install the correct CUDA-compatible PyTorch build separately before this file.
 nnunetv2==2.5.1
 nibabel>=5.0,<6
 SimpleITK>=2.2,<3

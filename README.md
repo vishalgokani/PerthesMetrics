@@ -44,6 +44,8 @@ conda activate perthesmetrics
 
 The reference environment uses Python 3.12, PyTorch 2.5.1 with CUDA 12.4, and nnU-Net v2.5.1. The training script checks CUDA support before touching scratch data and reports an actionable error if a CPU-only PyTorch build is active.
 
+If installing with `pip` instead, install the CUDA-compatible PyTorch build for your system from the [PyTorch installation guide](https://pytorch.org/get-started/locally/) **before** installing a requirements file. PyTorch is intentionally not listed in the repository requirements files because its correct package depends on the user's CUDA setup.
+
 ## Train
 
 Training accepts root BMP radiographs plus one matching BMP per class under `masks/<class>/`. They are converted in local scratch to three RGB NIfTI channels and one multiclass label per case.
@@ -59,16 +61,9 @@ python training\train_nnunet2d.py ^
 
 Five-fold splits are made by patient, not by radiograph. All views, sides, and time points belonging to one patient remain in the same validation fold. See [training/README.md](training/README.md).
 
-## Run inference
+## Inference
 
-```bat
-python inference\run_inference.py ^
-  --data-dir <data_dir> ^
-  --scratch-dir <scratch_dir> ^
-  --model-zip <model_zip>
-```
-
-A Hugging Face model repository can be supplied with `--model-repo` instead. Inference converts BMPs to NIfTI in scratch and exports one binary BMP per predicted class to `<data_dir>/nnunet_masks` by default. Overlay recoloring remains a separate script; see [inference/README.md](inference/README.md).
+Inference commands, local-model and Hugging Face workflows, batch examples, inputs, and outputs are documented only in [inference/README.md](inference/README.md). The released model is hosted at [vishalgokani/perthesmetrics-nnunet](https://huggingface.co/vishalgokani/perthesmetrics-nnunet).
 
 ## Model release and results
 
