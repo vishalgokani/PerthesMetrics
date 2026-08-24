@@ -221,9 +221,9 @@ def package_version(name: str) -> str | None:
 
 
 def copy_outputs(data_dir: Path, scratch: Path, config: dict, trainer: str, folds: list[int]) -> Path:
-    destination = data_dir / "perthesmetrics_nnunet_model"
+    destination = data_dir / f"training{datetime.now():%m%d%Y}"
     if destination.exists():
-        remove(destination)
+        raise FileExistsError(f"Refusing to replace existing training output folder: {destination}")
     destination.mkdir(parents=True)
     model_source = scratch / "nnUNet_results" / dataset_folder(config) / f"{trainer}__nnUNetPlans__2d"
     model_destination = destination / "nnUNet_results" / dataset_folder(config) / model_source.name
