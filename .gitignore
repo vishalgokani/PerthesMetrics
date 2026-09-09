@@ -2,6 +2,8 @@
 dataset/
 outputs/
 scratch/
+final_mask_analysis_outputs/
+testing/final_mask_analysis/outputs/
 .tmp_*/
 *.pt
 *.pth

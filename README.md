@@ -69,6 +69,11 @@ Inference commands, local-model and Hugging Face workflows, batch examples, inpu
 
 Use [model_release/](model_release/README.md) to validate and package an exported model. Use `tools/build_publication_results.py` to create sanitized aggregate results without committing images, model weights, or case-level records.
 
+For held-out test-set mask analysis, use `tools/final_mask_analysis.py`. It
+creates patient-pooled Dice tables, patient-bootstrap 95% confidence intervals,
+Waldenstrom-stage AP/frog boxplots, and optional mask overlay figures. See
+[testing/final_mask_analysis/README.md](testing/final_mask_analysis/README.md).
+
 ## Intended use
 
 This software and associated models are for research use. They are not medical devices and must not be used as the sole basis for diagnosis or treatment.
