@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,7 +29,7 @@ DEFAULT_MODEL_REPO = "vishalgokani/perthesmetrics-nnunet"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run PerthesMetrics 2D nnU-Net inference.")
     parser.add_argument("--data-dir", required=True, type=Path, help="Folder containing root radiograph BMP files.")
-    parser.add_argument("--scratch-dir", required=True, type=Path, help="Disposable local SSD folder.")
+    parser.add_argument("--scratch-dir", required=True, type=Path, help="Local SSD parent for an isolated run folder.")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--model-zip", type=Path, help="Path to a local nnU-Net model export zip.")
     source.add_argument(
@@ -45,10 +46,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu", help="Optional CUDA_VISIBLE_DEVICES value.")
     parser.add_argument(
         "--output-dir", type=Path,
-        help="Output folder (default: <data-dir>/nnunet_masks). Must not already exist.",
+        help="Optional output folder. Default: <data-dir>/nnunet_masks, with a timestamp if it exists.",
     )
     parser.add_argument("--keep-scratch", action="store_true")
-    return parser.parse_args()
+    parser.add_argument("--folds", nargs="+", type=int, help="Folds for prediction and attribution (default: all available).")
+    parser.add_argument("--disable-tta", action="store_true", help="Disable mirroring for prediction and attribution.")
+    parser.add_argument("--gradcam", action="store_true", help="Export class-specific 2D Grad-CAM maps and overlays.")
+    parser.add_argument("--gradcam-classes", nargs="+", type=int, choices=range(1, 9),
+                        help="Foreground class IDs to explain (default: 1 through 8).")
+    parser.add_argument("--gradcam-cases", nargs="+", help="Normalized case IDs to explain (default: all cases).")
+    parser.add_argument("--gradcam-layer", default="auto",
+                        help="Network module name (default: quarter-resolution decoder stage).")
+    args = parser.parse_args()
+    if not args.gradcam and (args.gradcam_classes or args.gradcam_cases or args.gradcam_layer != "auto"):
+        parser.error("Grad-CAM options require --gradcam.")
+    return args
 
 
 def remove(path: Path) -> None:
@@ -62,10 +74,17 @@ def prepare_scratch(path: Path) -> Path:
     path = path.resolve()
     if path.anchor == str(path):
         raise ValueError(f"Refusing to use filesystem root as scratch: {path}")
-    if path.exists():
-        remove(path)
-    path.mkdir(parents=True)
-    return path
+    path.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix="perthesmetrics_", dir=path)).resolve()
+
+
+def resolve_output(data_dir: Path, requested: Path | None) -> Path:
+    output = requested.resolve() if requested else data_dir / "nnunet_masks"
+    if output.exists() and requested is None:
+        output = data_dir / f"nnunet_masks_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
+    if output.exists():
+        raise FileExistsError(f"Refusing to replace existing output: {output}.")
+    return output
 
 
 def executable(name: str) -> str:
@@ -220,9 +239,8 @@ def main() -> int:
     data_dir = args.data_dir.resolve()
     if not data_dir.is_dir():
         raise FileNotFoundError(data_dir)
-    output = args.output_dir.resolve() if args.output_dir else data_dir / "nnunet_masks"
-    if output.exists():
-        raise FileExistsError(f"Refusing to replace existing output: {output}. Choose a new --output-dir.")
+    output = resolve_output(data_dir, args.output_dir)
+    print(f"Results will be copied to: {output}", flush=True)
     scratch = prepare_scratch(args.scratch_dir)
     completed = False
     try:
@@ -238,14 +256,24 @@ def main() -> int:
             env["CUDA_VISIBLE_DEVICES"] = args.gpu
         local_input = scratch / "input" / "imagesTs"
         case_to_filename = stage_bmp_inference_data(data_dir, local_input)
+        if args.gradcam_cases:
+            unknown = set(args.gradcam_cases) - set(case_to_filename)
+            if unknown:
+                raise ValueError(f"Unknown --gradcam-cases: {sorted(unknown)}")
         model_zip = get_model(args, scratch)
         model_hash = sha256(model_zip)
         dataset_id, model_folder, folds = install_model(model_zip, env)
+        if args.folds:
+            selected = list(dict.fromkeys(str(fold) for fold in args.folds))
+            if not set(selected).issubset(folds):
+                raise ValueError(f"Requested folds {selected}; available folds: {folds}")
+            folds = selected
         trainer, plans, configuration = model_folder.name.split("__")
         predictions = scratch / "predictions"
         run([
             "nnUNetv2_predict", "-d", dataset_id, "-i", str(local_input), "-o", str(predictions),
             "-f", *folds, "-tr", trainer, "-c", configuration, "-p", plans, "-device", device,
+            *(["--disable_tta"] if args.disable_tta else []),
         ], env)
         rendered = scratch / "rendered_masks"
         rows = export_prediction_bmps(predictions, rendered, case_to_filename, LABELS)
@@ -256,15 +284,35 @@ def main() -> int:
             "created_utc": datetime.now(timezone.utc).isoformat(), "num_cases": len(case_to_filename),
             "model_sha256": model_hash, "installed_model": model_folder.name, "folds": folds,
             "configuration": configuration, "device": device, "requested_device": args.device,
+            "mirroring": not args.disable_tta, "gradcam": args.gradcam,
             "labels": {str(value): name for name, value in LABELS.items()},
             "output_format": "one binary BMP per foreground class and source radiograph",
         }
         (rendered / "inference_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        if args.gradcam:
+            worker_env = env.copy()
+            worker_env["nnUNet_compile"] = "false"
+            command = [
+                sys.executable, str(Path(__file__).with_name("gradcam_worker.py")),
+                "--model-folder", str(model_folder), "--images-dir", str(local_input),
+                "--predictions-dir", str(predictions), "--source-dir", str(data_dir),
+                "--output-dir", str(rendered / "gradcam"), "--device", device,
+                "--folds", *folds, "--layer", args.gradcam_layer, "--model-sha256", model_hash,
+            ]
+            if args.disable_tta:
+                command.append("--disable-tta")
+            if args.gradcam_classes:
+                command.extend(["--classes", *map(str, args.gradcam_classes)])
+            if args.gradcam_cases:
+                command.extend(["--cases", *args.gradcam_cases])
+            subprocess.run(command, env=worker_env, check=True)
         shutil.copytree(rendered, output)
         print(f"Copied {len(rows)} predictions as class BMP masks to: {output}")
         completed = True
     finally:
         if scratch.exists() and completed and not args.keep_scratch:
+            if scratch.parent != args.scratch_dir.resolve() or not scratch.name.startswith("perthesmetrics_"):
+                raise RuntimeError(f"Refusing to clean unexpected scratch path: {scratch}")
             remove(scratch)
             print(f"Deleted scratch directory: {scratch}")
         elif scratch.exists():

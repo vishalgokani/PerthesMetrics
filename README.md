@@ -65,6 +65,8 @@ Five-fold splits are made by patient, not by radiograph. All views, sides, and t
 
 Inference commands, local-model and Hugging Face workflows, batch examples, inputs, and outputs are documented only in [inference/README.md](inference/README.md). The released model is hosted at [vishalgokani/perthesmetrics-nnunet](https://huggingface.co/vishalgokani/perthesmetrics-nnunet).
 
+Add `--gradcam` for separate 2D attribution maps and overlays for each predicted class. Masks and heatmaps are automatically copied into a subdirectory of the input data folder.
+
 ## Model release and results
 
 Use [model_release/](model_release/README.md) to validate and package an exported model. Use `tools/build_publication_results.py` to create sanitized aggregate results without committing images, model weights, or case-level records.
