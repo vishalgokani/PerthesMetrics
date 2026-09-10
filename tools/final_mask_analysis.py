@@ -854,37 +854,43 @@ def write_publication_table_figure(
     if not rows:
         return
     fields = list(rows[0])
-    cell_text = [[str(row.get(field, "")) for field in fields] for row in rows]
+    is_wide_table = len(fields) > 6
+    cell_text = []
+    for row in rows:
+        cells = [str(row.get(field, "")) for field in fields]
+        if is_wide_table:
+            cells = [cell.replace(" (n=", "\n(n=") for cell in cells]
+        cell_text.append(cells)
     max_lengths = [
         max(len(str(field)), *(len(row[column]) for row in cell_text))
         for column, field in enumerate(fields)
     ]
     width_ratios = np.asarray([max(8, length) for length in max_lengths], dtype=float)
-    width_ratios[0] *= 1.15
+    width_ratios[0] *= 1.45
     column_widths = width_ratios / width_ratios.sum()
-    figure_width = max(9.0, min(24.0, float(width_ratios.sum()) * 0.105))
-    figure_height = 1.45 + 0.42 * len(rows)
+    figure_width = 12.5 if is_wide_table else max(8.5, min(11.0, float(width_ratios.sum()) * 0.09))
+    figure_height = 4.2 if is_wide_table else 1.15 + 0.44 * len(rows)
     with plt.rc_context({"font.family": PUBLICATION_FONT, "svg.fonttype": "none", "pdf.fonttype": 42}):
         figure, axis = plt.subplots(figsize=(figure_width, figure_height))
+        figure.subplots_adjust(left=0.015, right=0.985, top=0.92, bottom=0.03)
         axis.axis("off")
-        axis.set_title(title, fontsize=12, fontweight="bold", pad=10)
+        axis.set_title(title, fontsize=14, fontweight="bold", pad=5)
         table = axis.table(
             cellText=cell_text,
             colLabels=fields,
             cellLoc="center",
             colLoc="center",
             colWidths=column_widths,
-            loc="center",
+            bbox=[0.0, 0.02, 1.0, 0.86],
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(9)
-        table.scale(1.0, 1.42)
+        table.set_fontsize(11)
         for (row_index, column_index), cell in table.get_celld().items():
             cell.set_facecolor("white")
             cell.set_edgecolor("black")
             cell.set_linewidth(0.0)
             if row_index == 0:
-                cell.set_text_props(weight="bold")
+                cell.set_text_props(weight="bold", fontsize=11)
                 cell.visible_edges = "B"
                 cell.set_linewidth(0.8)
             elif row_index == len(rows):
@@ -893,6 +899,7 @@ def write_publication_table_figure(
             if column_index == 0:
                 cell.get_text().set_ha("left")
         path.parent.mkdir(parents=True, exist_ok=True)
+        figure.savefig(path.with_suffix(".png"), dpi=300, bbox_inches="tight")
         figure.savefig(path.with_suffix(".svg"), bbox_inches="tight")
         figure.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
         plt.close(figure)
@@ -953,11 +960,11 @@ def plot_stage_view_boxplots(
     figure, axes = plt.subplots(
         len(ANALYSIS_GROUP_ORDER),
         len(VIEW_ORDER),
-        figsize=(15.5, 2.45 * len(ANALYSIS_GROUP_ORDER)),
+        figsize=(10.5, 1.8 * len(ANALYSIS_GROUP_ORDER)),
         sharex=True,
         sharey=True,
     )
-    figure.subplots_adjust(left=0.07, right=0.99, top=0.94, bottom=0.16, hspace=0.22, wspace=0.08)
+    figure.subplots_adjust(left=0.09, right=0.99, top=0.96, bottom=0.13, hspace=0.30, wspace=0.12)
     grouped: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     for row in filtered:
         if math.isfinite(row.dice):
@@ -975,7 +982,7 @@ def plot_stage_view_boxplots(
                 axis.scatter(
                     np.full(len(values), position) + jitter,
                     values,
-                    s=17,
+                    s=13,
                     color=rgb01(CLASS_COLORS[mask_name]),
                     edgecolors="black",
                     linewidths=0.25,
@@ -1001,13 +1008,19 @@ def plot_stage_view_boxplots(
             axis.set_ylim(-0.02, 1.02)
             axis.set_xlim(0.4, len(ANALYSIS_MASK_ORDER) + 0.6)
             axis.grid(axis="y", color="0.88", linewidth=0.6)
+            axis.tick_params(axis="y", labelsize=9)
             if row_index == 0:
-                axis.set_title(view.upper())
+                axis.set_title(view.upper(), fontsize=13, fontweight="bold")
             if col_index == 0:
-                axis.set_ylabel(f"{analysis_group}\nDice")
+                axis.set_ylabel(f"{analysis_group}\nDice", fontsize=11)
             if row_index == len(ANALYSIS_GROUP_ORDER) - 1:
                 axis.set_xticks(positions)
-                axis.set_xticklabels([CLASS_DISPLAY[name] for name in ANALYSIS_MASK_ORDER], rotation=35, ha="right")
+                axis.set_xticklabels(
+                    [CLASS_DISPLAY[name] for name in ANALYSIS_MASK_ORDER],
+                    rotation=38,
+                    ha="right",
+                    fontsize=9,
+                )
             else:
                 axis.set_xticks(positions)
                 axis.tick_params(axis="x", labelbottom=False)
@@ -1025,8 +1038,20 @@ def plot_stage_view_boxplots(
         )
         for name in ANALYSIS_MASK_ORDER
     ]
-    figure.suptitle("Patient-pooled Dice by affected status, Waldenstrom stage, and radiograph view", y=1.01)
-    figure.legend(handles=handles, loc="lower center", ncol=4, frameon=False, bbox_to_anchor=(0.5, 0.01))
+    figure.suptitle(
+        "Patient-pooled Dice by affected status, Waldenstrom stage, and radiograph view",
+        fontsize=15,
+        fontweight="bold",
+        y=0.995,
+    )
+    figure.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=4,
+        frameon=False,
+        fontsize=9,
+        bbox_to_anchor=(0.5, 0.005),
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(path, dpi=300, bbox_inches="tight")
     figure.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
@@ -1168,13 +1193,73 @@ def write_mask_colors(path: Path) -> None:
     )
 
 
+def read_csv_dictionaries(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Required saved analysis CSV not found: {path}")
+    with path.open(newline="", encoding="utf-8-sig") as stream:
+        return list(csv.DictReader(stream))
+
+
+def read_patient_mask_dice(path: Path) -> list[PatientMaskDice]:
+    rows: list[PatientMaskDice] = []
+    for row in read_csv_dictionaries(path):
+        rows.append(
+            PatientMaskDice(
+                scope=row["scope"],
+                patient_id=row["patient_id"],
+                view=row["view"],
+                affected_status=row["affected_status"],
+                analysis_group=row["analysis_group"],
+                waldenstrom_class=row["waldenstrom_class"],
+                waldenstrom_stage=row["waldenstrom_stage"],
+                mask=row["mask"],
+                dice=float(row["dice"]) if row["dice"].strip() else math.nan,
+                n_images=int(row["n_images"]),
+                intersection_pixels=int(row["intersection_pixels"]),
+                gt_pixels=int(row["gt_pixels"]),
+                pred_pixels=int(row["pred_pixels"]),
+            )
+        )
+    return rows
+
+
+def render_saved_publication_outputs(output_dir: Path, cutoffs: list[float], seed: int) -> None:
+    """Re-render the stage table and boxplots from existing analysis CSVs only."""
+    analysis_group_summaries: list[dict[str, object]] = [
+        dict(row)
+        for row in read_csv_dictionaries(output_dir / "analysis_group_model_performance_by_mask.csv")
+    ]
+    waldenstrom_rows = publication_group_rows(
+        analysis_group_summaries,
+        "analysis_group",
+        ANALYSIS_GROUP_ORDER,
+        {group: (group if group == "Unaffected" else f"Stage {group}") for group in ANALYSIS_GROUP_ORDER},
+    )
+    write_publication_table_figure(
+        output_dir / "waldenstrom_stage_model_performance_publication_table",
+        waldenstrom_rows,
+        "Segmentation Performance by Waldenstrom Stage",
+    )
+
+    patient_rows = read_patient_mask_dice(output_dir / "patient_pooled_dice_by_analysis_group_view.csv")
+    plot_stage_view_boxplots(output_dir / "analysis_group_view_boxplots.png", patient_rows, seed)
+    for cutoff in sorted({float(cutoff) for cutoff in cutoffs}, reverse=True):
+        plot_name = f"analysis_group_view_boxplots_cutoff_{cutoff:.2f}".replace(".", "_")
+        plot_stage_view_boxplots(
+            output_dir / f"{plot_name}.png",
+            patient_rows,
+            seed,
+            cutoff=cutoff,
+        )
+
+
 def default_output_dir(data_dir: Path) -> Path:
     return data_dir / "final_mask_analysis_outputs"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Patient-bootstrapped final mask analysis.")
-    parser.add_argument("--data-dir", required=True, type=Path, help="Directory containing root radiographs.")
+    parser.add_argument("--data-dir", type=Path, help="Directory containing root radiographs.")
     parser.add_argument("--ground-truth-dir", type=Path, help="Ground-truth binary mask root. Defaults to DATA_DIR/masks.")
     parser.add_argument("--prediction-dir", type=Path, help="Inference binary mask root. Defaults to DATA_DIR/nnunet_masks.")
     parser.add_argument("--ap-classes-csv", type=Path, help="AP Waldenstrom CSV. Defaults to DATA_DIR/ap_classes.csv.")
@@ -1188,6 +1273,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bootstrap-iterations", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=20260906)
     parser.add_argument("--cutoffs", nargs="+", type=float, default=[0.90, 0.80])
+    parser.add_argument(
+        "--render-only",
+        action="store_true",
+        help="Re-render the Waldenstrom table and all boxplots from saved CSVs; do not read masks.",
+    )
     parser.add_argument("--patient-regex", default=r"Patient[_ -]*(?P<patient_id>\d+)")
     parser.add_argument(
         "--allow-resize-for-metrics",
@@ -1198,7 +1288,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.render_only:
+        if args.output_dir is None:
+            parser.error("--render-only requires --output-dir")
+        output_dir = args.output_dir.resolve()
+        render_saved_publication_outputs(output_dir, args.cutoffs, args.seed)
+        print(f"Re-rendered publication outputs from existing CSVs in: {output_dir}")
+        return 0
+    if args.data_dir is None:
+        parser.error("--data-dir is required unless --render-only is used")
     data_dir = args.data_dir.resolve()
     gt_dir = (args.ground_truth_dir or data_dir / "masks").resolve()
     pred_dir = (args.prediction_dir or data_dir / "nnunet_masks").resolve()

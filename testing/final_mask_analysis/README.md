@@ -120,3 +120,15 @@ python tools\create_mask_overlays.py ^
   --data-dir "<DATA_DIR>" ^
   --stratify
 ```
+
+To re-render only the Waldenstrom publication table and the three boxplot
+variants from their existing CSV files, without reading any image or mask, run:
+
+```bat
+python tools\final_mask_analysis.py ^
+  --render-only ^
+  --output-dir "<OUTPUT_DIR>"
+```
+
+This overwrites only the PDF, SVG, and PNG renderings of those outputs. It does
+not recalculate metrics or change the saved CSV, Markdown, or TeX tables.

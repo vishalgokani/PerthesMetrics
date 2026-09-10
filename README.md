@@ -75,6 +75,12 @@ creates patient-pooled Dice tables, patient-bootstrap 95% confidence intervals,
 Waldenstrom-stage AP/frog boxplots, and optional mask overlay figures. See
 [testing/final_mask_analysis/README.md](testing/final_mask_analysis/README.md).
 
+To prepare publication panels, use `tools/cropper.py` to apply one interactive
+square crop to as many as ten same-sized images. Then pass 28 prepared panels to
+`tools/waldenstrom_figure_builder.py` in left-to-right, top-to-bottom order. The
+builder writes a self-contained SVG plus 600-DPI PNG and PDF versions; run each
+script with `--help` for the full CLI and panel order.
+
 ## Intended use
 
 This software and associated models are for research use. They are not medical devices and must not be used as the sole basis for diagnosis or treatment.
