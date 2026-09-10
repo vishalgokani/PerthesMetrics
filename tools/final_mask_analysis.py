@@ -81,6 +81,14 @@ WALDENSTROM_STAGES = {
 STAGE_ORDER = ["Ia", "Ib", "IIa", "IIb", "IIIa", "IIIb", "IV"]
 ANALYSIS_GROUP_ORDER = ["Unaffected", *STAGE_ORDER]
 VIEW_ORDER = ["ap", "frog"]
+PUBLICATION_FONT = "Times New Roman"
+matplotlib.rcParams.update(
+    {
+        "font.family": PUBLICATION_FONT,
+        "svg.fonttype": "none",
+        "pdf.fonttype": 42,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -357,6 +365,17 @@ def dice_from_counts(intersection: int, gt_pixels: int, pred_pixels: int) -> flo
     return 2.0 * intersection / denominator
 
 
+def metrics_from_counts(intersection: int, gt_pixels: int, pred_pixels: int) -> dict[str, float]:
+    """Return overlap metrics using pooled pixels from one patient/stratum."""
+    union = gt_pixels + pred_pixels - intersection
+    return {
+        "dice": dice_from_counts(intersection, gt_pixels, pred_pixels),
+        "iou": intersection / union if union else math.nan,
+        "precision": intersection / pred_pixels if pred_pixels else (0.0 if gt_pixels else math.nan),
+        "recall": intersection / gt_pixels if gt_pixels else (0.0 if pred_pixels else math.nan),
+    }
+
+
 def collect_image_mask_dice(
     data_dir: Path,
     gt_dir: Path,
@@ -595,6 +614,44 @@ def summarize_patient_rows(
     return summaries
 
 
+def summarize_overall_metrics(
+    rows: list[PatientMaskDice],
+    iterations: int,
+    seed: int,
+) -> list[dict[str, object]]:
+    """Summarize patient-pooled Dice, IoU, precision, and recall by mask."""
+    grouped: dict[str, list[PatientMaskDice]] = defaultdict(list)
+    for row in rows:
+        grouped[row.mask].append(row)
+    output: list[dict[str, object]] = []
+    for mask_index, mask_name in enumerate(ANALYSIS_MASK_ORDER):
+        group_rows = grouped.get(mask_name, [])
+        summary: dict[str, object] = {
+            "mask": mask_name,
+            "mask_display": CLASS_DISPLAY[mask_name],
+        }
+        patient_metrics = [
+            metrics_from_counts(row.intersection_pixels, row.gt_pixels, row.pred_pixels)
+            for row in group_rows
+        ]
+        dice_values = finite_values(metrics["dice"] for metrics in patient_metrics)
+        summary["n_patients"] = int(dice_values.size)
+        for metric_index, metric_name in enumerate(("dice", "iou", "precision", "recall")):
+            values = finite_values(
+                metrics[metric_name]
+                for metrics in patient_metrics
+                if math.isfinite(metrics["dice"])
+            )
+            rng = np.random.default_rng(seed + mask_index * 10 + metric_index)
+            ci_low, ci_high = bootstrap_ci(values, iterations, rng)
+            summary[f"mean_patient_pooled_{metric_name}"] = float(np.mean(values)) if values.size else math.nan
+            summary[f"{metric_name}_ci95_low"] = ci_low
+            summary[f"{metric_name}_ci95_high"] = ci_high
+        summary["bootstrap_iterations"] = iterations
+        output.append(summary)
+    return output
+
+
 def analysis_group_counts(rows: list[ImageMaskDice]) -> list[dict[str, object]]:
     seen: set[tuple[str, str, str]] = set()
     for row in rows:
@@ -685,25 +742,46 @@ def analysis_group_sort_key(value: object) -> int:
         return len(ANALYSIS_GROUP_ORDER)
 
 
-def publication_overall_rows(summaries: list[dict[str, object]], cutoffs: list[float]) -> list[dict[str, object]]:
-    output: list[dict[str, object]] = []
-    for row in sorted(summaries, key=lambda item: mask_sort_key(item.get("mask"))):
-        formatted: dict[str, object] = {
-            "Mask": row["mask_display"],
-            "Patients": row["n_patients"],
-            "Images": row["n_images"],
-            "Patient-pooled Dice, mean (95% CI)": (
-                f"{format_decimal(row['mean_patient_pooled_dice'])} "
-                f"({format_decimal(row['ci95_low'])}-{format_decimal(row['ci95_high'])})"
-            ),
-            "Median Dice": format_decimal(row["median_patient_pooled_dice"]),
+def format_metric_ci(row: dict[str, object], metric: str, digits: int = 2) -> str:
+    return (
+        f"{format_decimal(row[f'mean_patient_pooled_{metric}'], digits)} "
+        f"[{format_decimal(row[f'{metric}_ci95_low'], digits)}-"
+        f"{format_decimal(row[f'{metric}_ci95_high'], digits)}]"
+    )
+
+
+def publication_overall_rows(summaries: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {
+            "Hip Structure": row["mask_display"],
+            "n": row["n_patients"],
+            "Dice": format_metric_ci(row, "dice"),
+            "IoU": format_metric_ci(row, "iou"),
+            "Precision": format_metric_ci(row, "precision"),
+            "Recall": format_metric_ci(row, "recall"),
         }
-        for cutoff in cutoffs:
-            suffix = cutoff_suffix(cutoff)
-            formatted[f"Patients with Dice >= {cutoff:.2f}, % (95% CI)"] = (
-                f"{format_percent(row.get(f'pass_rate_ge_{suffix}'))} "
-                f"({format_percent(row.get(f'pass_rate_ge_{suffix}_ci95_low'))}-"
-                f"{format_percent(row.get(f'pass_rate_ge_{suffix}_ci95_high'))})"
+        for row in sorted(summaries, key=lambda item: mask_sort_key(item.get("mask")))
+    ]
+
+
+def publication_group_rows(
+    summaries: list[dict[str, object]],
+    group_field: str,
+    groups: list[str],
+    group_labels: dict[str, str],
+) -> list[dict[str, object]]:
+    indexed = {(str(row.get("mask")), str(row.get(group_field))): row for row in summaries}
+    output: list[dict[str, object]] = []
+    for mask_name in ANALYSIS_MASK_ORDER:
+        formatted: dict[str, object] = {"Hip Structure": CLASS_DISPLAY[mask_name]}
+        for group in groups:
+            label = group_labels[group]
+            row = indexed.get((mask_name, group))
+            formatted[label] = (
+                f"{format_decimal(row['mean_patient_pooled_dice'], 2)} "
+                f"[{format_decimal(row['ci95_low'], 2)}-{format_decimal(row['ci95_high'], 2)}] "
+                f"(n={row['n_patients']})"
+                if row else "NA (n=0)"
             )
         output.append(formatted)
     return output
@@ -767,6 +845,72 @@ def write_latex_table(path: Path, rows: list[dict[str, object]], caption: str, l
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def write_publication_table_figure(
+    path: Path,
+    rows: list[dict[str, object]],
+    title: str,
+) -> None:
+    """Render a clean, editable vector table as SVG and PDF."""
+    if not rows:
+        return
+    fields = list(rows[0])
+    cell_text = [[str(row.get(field, "")) for field in fields] for row in rows]
+    max_lengths = [
+        max(len(str(field)), *(len(row[column]) for row in cell_text))
+        for column, field in enumerate(fields)
+    ]
+    width_ratios = np.asarray([max(8, length) for length in max_lengths], dtype=float)
+    width_ratios[0] *= 1.15
+    column_widths = width_ratios / width_ratios.sum()
+    figure_width = max(9.0, min(24.0, float(width_ratios.sum()) * 0.105))
+    figure_height = 1.45 + 0.42 * len(rows)
+    with plt.rc_context({"font.family": PUBLICATION_FONT, "svg.fonttype": "none", "pdf.fonttype": 42}):
+        figure, axis = plt.subplots(figsize=(figure_width, figure_height))
+        axis.axis("off")
+        axis.set_title(title, fontsize=12, fontweight="bold", pad=10)
+        table = axis.table(
+            cellText=cell_text,
+            colLabels=fields,
+            cellLoc="center",
+            colLoc="center",
+            colWidths=column_widths,
+            loc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1.0, 1.42)
+        for (row_index, column_index), cell in table.get_celld().items():
+            cell.set_facecolor("white")
+            cell.set_edgecolor("black")
+            cell.set_linewidth(0.0)
+            if row_index == 0:
+                cell.set_text_props(weight="bold")
+                cell.visible_edges = "B"
+                cell.set_linewidth(0.8)
+            elif row_index == len(rows):
+                cell.visible_edges = "B"
+                cell.set_linewidth(0.8)
+            if column_index == 0:
+                cell.get_text().set_ha("left")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        figure.savefig(path.with_suffix(".svg"), bbox_inches="tight")
+        figure.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
+        plt.close(figure)
+
+
+def write_publication_table_bundle(
+    base_path: Path,
+    rows: list[dict[str, object]],
+    title: str,
+    caption: str,
+    label: str,
+) -> None:
+    write_csv(base_path.with_suffix(".csv"), rows)
+    write_markdown_table(base_path.with_suffix(".md"), rows)
+    write_latex_table(base_path.with_suffix(".tex"), rows, caption, label)
+    write_publication_table_figure(base_path, rows, title)
+
+
 def write_csv(path: Path, rows: list[object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
@@ -799,8 +943,8 @@ def rgb01(color: tuple[int, int, int]) -> tuple[float, float, float]:
 def plot_stage_view_boxplots(
     path: Path,
     rows: list[PatientMaskDice],
-    cutoff: float,
     seed: int,
+    cutoff: float | None = None,
 ) -> None:
     filtered = [row for row in rows if row.analysis_group in ANALYSIS_GROUP_ORDER and row.view in VIEW_ORDER]
     if not filtered:
@@ -852,7 +996,8 @@ def plot_stage_view_boxplots(
             for element in ("boxes", "whiskers", "caps", "medians"):
                 for artist in boxplot[element]:
                     artist.set_zorder(4)
-            axis.axhline(cutoff, color="black", linestyle="--", linewidth=0.9)
+            if cutoff is not None:
+                axis.axhline(cutoff, color="black", linestyle="--", linewidth=0.9)
             axis.set_ylim(-0.02, 1.02)
             axis.set_xlim(0.4, len(ANALYSIS_MASK_ORDER) + 0.6)
             axis.grid(axis="y", color="0.88", linewidth=0.6)
@@ -885,6 +1030,7 @@ def plot_stage_view_boxplots(
     path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(path, dpi=300, bbox_inches="tight")
     figure.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
+    figure.savefig(path.with_suffix(".svg"), bbox_inches="tight")
     plt.close(figure)
 
 
@@ -1042,9 +1188,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bootstrap-iterations", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=20260906)
     parser.add_argument("--cutoffs", nargs="+", type=float, default=[0.90, 0.80])
-    parser.add_argument("--plot-cutoff", type=float, default=0.90)
     parser.add_argument("--patient-regex", default=r"Patient[_ -]*(?P<patient_id>\d+)")
-    parser.add_argument("--make-mask-figures", action="store_true", help="Also write original/GT/nnU-Net overlay BMPs.")
     parser.add_argument(
         "--allow-resize-for-metrics",
         action="store_true",
@@ -1123,25 +1267,41 @@ def main() -> int:
         output_dir / "overall_model_performance_by_mask.csv",
         overall_summaries,
     )
-    publication_rows = publication_overall_rows(overall_summaries, args.cutoffs)
-    write_csv(output_dir / "overall_model_performance_publication_table.csv", publication_rows)
-    write_markdown_table(output_dir / "overall_model_performance_publication_table.md", publication_rows)
-    write_latex_table(
-        output_dir / "overall_model_performance_publication_table.tex",
+    overall_metric_summaries = summarize_overall_metrics(
+        all_patient_rows,
+        args.bootstrap_iterations,
+        args.seed,
+    )
+    write_csv(output_dir / "overall_model_performance_all_metrics.csv", overall_metric_summaries)
+    publication_rows = publication_overall_rows(overall_metric_summaries)
+    write_publication_table_bundle(
+        output_dir / "overall_model_performance_publication_table",
         publication_rows,
+        "Overall Segmentation Performance",
         "Overall patient-pooled segmentation performance on the held-out test set.",
         "tab:overall-mask-performance",
     )
-    write_csv(
-        output_dir / "view_model_performance_by_mask.csv",
-        summarize_patient_rows(
-            view_patient_rows,
-            "view",
-            ("view",),
-            args.cutoffs,
-            args.bootstrap_iterations,
-            args.seed,
-        ),
+    view_summaries = summarize_patient_rows(
+        view_patient_rows,
+        "view",
+        ("view",),
+        args.cutoffs,
+        args.bootstrap_iterations,
+        args.seed,
+    )
+    write_csv(output_dir / "view_model_performance_by_mask.csv", view_summaries)
+    view_publication_rows = publication_group_rows(
+        view_summaries,
+        "view",
+        VIEW_ORDER,
+        {"ap": "AP", "frog": "Frog-leg"},
+    )
+    write_publication_table_bundle(
+        output_dir / "view_model_performance_publication_table",
+        view_publication_rows,
+        "Segmentation Performance by Radiograph View",
+        "Patient-pooled Dice performance by radiograph view on the held-out test set.",
+        "tab:view-mask-performance",
     )
     write_csv(
         output_dir / "affected_status_model_performance_by_mask.csv",
@@ -1154,16 +1314,27 @@ def main() -> int:
             args.seed,
         ),
     )
-    write_csv(
-        output_dir / "analysis_group_model_performance_by_mask.csv",
-        summarize_patient_rows(
-            analysis_group_patient_rows,
-            "analysis_group",
-            ("analysis_group",),
-            args.cutoffs,
-            args.bootstrap_iterations,
-            args.seed,
-        ),
+    analysis_group_summaries = summarize_patient_rows(
+        analysis_group_patient_rows,
+        "analysis_group",
+        ("analysis_group",),
+        args.cutoffs,
+        args.bootstrap_iterations,
+        args.seed,
+    )
+    write_csv(output_dir / "analysis_group_model_performance_by_mask.csv", analysis_group_summaries)
+    waldenstrom_publication_rows = publication_group_rows(
+        analysis_group_summaries,
+        "analysis_group",
+        ANALYSIS_GROUP_ORDER,
+        {group: (group if group == "Unaffected" else f"Stage {group}") for group in ANALYSIS_GROUP_ORDER},
+    )
+    write_publication_table_bundle(
+        output_dir / "waldenstrom_stage_model_performance_publication_table",
+        waldenstrom_publication_rows,
+        "Segmentation Performance by Waldenstrom Stage",
+        "Patient-pooled Dice performance for unaffected hips and affected hips by Waldenstrom stage.",
+        "tab:waldenstrom-mask-performance",
     )
     write_csv(
         output_dir / "analysis_group_view_model_performance_by_mask.csv",
@@ -1199,12 +1370,19 @@ def main() -> int:
         ),
     )
 
-    plot_cutoffs = sorted({float(cutoff) for cutoff in [*args.cutoffs, args.plot_cutoff]}, reverse=True)
-    for cutoff in plot_cutoffs:
+    plot_stage_view_boxplots(
+        output_dir / "analysis_group_view_boxplots.png",
+        analysis_group_view_patient_rows,
+        args.seed,
+    )
+    for cutoff in sorted({float(cutoff) for cutoff in args.cutoffs}, reverse=True):
         plot_name = f"analysis_group_view_boxplots_cutoff_{cutoff:.2f}".replace(".", "_")
-        plot_stage_view_boxplots(output_dir / f"{plot_name}.png", analysis_group_view_patient_rows, cutoff, args.seed)
-    if args.make_mask_figures:
-        create_mask_figures(data_dir, gt_dir, pred_dir, output_dir / "mask_figures", stage_map)
+        plot_stage_view_boxplots(
+            output_dir / f"{plot_name}.png",
+            analysis_group_view_patient_rows,
+            args.seed,
+            cutoff=cutoff,
+        )
 
     print(f"Wrote final mask analysis outputs to: {output_dir}")
     return 0

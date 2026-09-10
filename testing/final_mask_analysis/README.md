@@ -29,8 +29,7 @@ From the repository root:
 ```bat
 conda activate perthesmetrics
 python tools\final_mask_analysis.py ^
-  --data-dir "F:\projects\perthesmetrics\lcpd_radiograph_data_for_perthesmetrics\final_dataset\all_radiographs\test\test" ^
-  --make-mask-figures
+  --data-dir "F:\projects\perthesmetrics\lcpd_radiograph_data_for_perthesmetrics\final_dataset\all_radiographs\test\test"
 ```
 
 The default output directory is:
@@ -44,16 +43,22 @@ To keep results somewhere else:
 ```bat
 python tools\final_mask_analysis.py ^
   --data-dir "<DATA_DIR>" ^
-  --output-dir "<OUTPUT_DIR>" ^
-  --make-mask-figures
+  --output-dir "<OUTPUT_DIR>"
 ```
 
 ## Main outputs
 
 - `overall_model_performance_by_mask.csv`: overall patient-pooled Dice and 95%
   CI for each mask, plus patient pass-rate CIs for Dice cutoffs 0.90 and 0.80.
-- `overall_model_performance_publication_table.md` and `.tex`: formatted
-  full-dataset performance table for manuscripts or reports.
+- `overall_model_performance_publication_table.{csv,md,tex,pdf,svg}`:
+  patient-bootstrapped Dice, IoU, precision, and recall with 95% CIs and patient
+  counts. The PDF/SVG versions use Times New Roman.
+- `waldenstrom_stage_model_performance_publication_table.{csv,md,tex,pdf,svg}`:
+  patient-bootstrapped Dice with 95% CIs and patient counts for unaffected hips
+  and every Waldenstrom stage (Ia, Ib, IIa, IIb, IIIa, IIIb, and IV).
+- `view_model_performance_publication_table.{csv,md,tex,pdf,svg}`:
+  patient-bootstrapped Dice with 95% CIs and patient counts for AP and frog-leg
+  views.
 - `view_model_performance_by_mask.csv`: same analysis split into AP and frog
   views.
 - `affected_status_model_performance_by_mask.csv`: patient-bootstrapped
@@ -73,15 +78,12 @@ python tools\final_mask_analysis.py ^
   performance for affected hips only, for AP and frog.
 - `patient_pooled_dice_*.csv`: patient-level pooled Dice values used for the
   bootstraps.
-- `analysis_group_view_boxplots_cutoff_0_90.png` / `.pdf` and
-  `analysis_group_view_boxplots_cutoff_0_80.png` / `.pdf`: AP/Frog boxplot
-  figures using separate Dice cutoff reference lines. The first row is
-  unaffected hips, followed by affected hips split into Waldenstrom stages.
-  Boxes are black and white; patient dots use the same colors as the mask
-  overlays. Scatter points are drawn underneath the boxplots with partial
-  transparency.
-- `mask_figures/`: optional original, ground-truth overlay, and nnU-Net overlay
-  BMPs when `--make-mask-figures` is supplied.
+- `analysis_group_view_boxplots.{png,pdf,svg}`: AP/Frog boxplot figure with no
+  cutoff reference line.
+- `analysis_group_view_boxplots_cutoff_0_90.{png,pdf,svg}` and
+  `analysis_group_view_boxplots_cutoff_0_80.{png,pdf,svg}`: the same boxplots
+  with dashed Dice cutoff lines. In every version, the first row is unaffected
+  hips, followed by affected hips split into Waldenstrom stages.
 - `mask_figures_stratified/`: optional overlay copies organized as
   `<view>/<waldenstrom_class>/...`, using `ap_classes.csv` and
   `frog_classes.csv`.
@@ -108,4 +110,13 @@ If overlay figures already exist and only need to be reorganized, run:
 ```bat
 python tools\stratify_mask_figures.py ^
   --data-dir "F:\projects\perthesmetrics\lcpd_radiograph_data_for_perthesmetrics\final_dataset\all_radiographs\test\test"
+```
+
+The quantitative analysis never creates or overwrites mask overlays. If new
+overlays are deliberately needed, use the separate script:
+
+```bat
+python tools\create_mask_overlays.py ^
+  --data-dir "<DATA_DIR>" ^
+  --stratify
 ```

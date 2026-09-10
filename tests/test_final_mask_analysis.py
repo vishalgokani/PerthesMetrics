@@ -15,8 +15,10 @@ from tools.final_mask_analysis import (
     pool_by_patient,
     read_radiograph_metadata,
     read_stage_maps,
+    summarize_overall_metrics,
     summarize_patient_rows,
     unknown_affected_status_rows,
+    write_publication_table_figure,
 )
 
 
@@ -92,6 +94,13 @@ class FinalMaskAnalysisTests(unittest.TestCase):
             self.assertEqual(head_summary["n_patients"], 4)
             self.assertAlmostEqual(head_summary["pass_rate_ge_0_90"], 3 / 4)
             self.assertAlmostEqual(head_summary["pass_rate_ge_0_80"], 1.0)
+            metric_summary = summarize_overall_metrics(patient_rows, 100, 123)
+            head_metrics = next(row for row in metric_summary if row["mask"] == "head")
+            self.assertEqual(head_metrics["n_patients"], 4)
+            self.assertAlmostEqual(head_metrics["mean_patient_pooled_dice"], (6 / 7 + 3) / 4)
+            self.assertAlmostEqual(head_metrics["mean_patient_pooled_iou"], (3 / 4 + 3) / 4)
+            self.assertAlmostEqual(head_metrics["mean_patient_pooled_precision"], 1.0)
+            self.assertAlmostEqual(head_metrics["mean_patient_pooled_recall"], (3 / 4 + 3) / 4)
             exclusions = unknown_affected_status_rows(image_rows)
             self.assertEqual([row["filename"] for row in exclusions], ["Patient_3000_AP_1.bmp"])
             missing_stage = missing_affected_stage_rows(image_rows)
@@ -106,9 +115,24 @@ class FinalMaskAnalysisTests(unittest.TestCase):
             groups = {row.analysis_group for row in analysis_group_view_rows}
             self.assertEqual(groups, {"Ia", "Unaffected"})
             figure_path = root / "stage_view_boxplot.png"
-            plot_stage_view_boxplots(figure_path, analysis_group_view_rows, 0.90, 123)
+            plot_stage_view_boxplots(figure_path, analysis_group_view_rows, 123)
             self.assertTrue(figure_path.is_file())
             self.assertTrue(figure_path.with_suffix(".pdf").is_file())
+            self.assertTrue(figure_path.with_suffix(".svg").is_file())
+            cutoff_path = root / "stage_view_boxplot_cutoff_0_90.png"
+            plot_stage_view_boxplots(cutoff_path, analysis_group_view_rows, 123, cutoff=0.90)
+            self.assertTrue(cutoff_path.is_file())
+            self.assertTrue(cutoff_path.with_suffix(".pdf").is_file())
+            self.assertTrue(cutoff_path.with_suffix(".svg").is_file())
+
+            table_path = root / "publication_table"
+            write_publication_table_figure(
+                table_path,
+                [{"Hip Structure": "Femoral Head", "n": 4, "Dice": "0.96 [0.93-0.98]"}],
+                "Test Publication Table",
+            )
+            self.assertTrue(table_path.with_suffix(".pdf").is_file())
+            self.assertTrue(table_path.with_suffix(".svg").is_file())
 
 
 if __name__ == "__main__":
