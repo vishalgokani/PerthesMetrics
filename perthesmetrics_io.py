@@ -114,6 +114,8 @@ def stage_bmp_inference_data(data_dir: Path, images_ts: Path) -> dict[str, str]:
         manifest.append({
             "case_id": case_id, "source_filename": source.name,
             "width": width, "height": height,
+            "source_size": source.stat().st_size,
+            "source_mtime_ns": source.stat().st_mtime_ns,
         })
     write_conversion_manifest(images_ts.parent / "input_conversion_manifest.csv", manifest)
     return mapping

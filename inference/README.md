@@ -57,58 +57,13 @@ The default remote filename is `perthesmetrics_nnunet_model.zip`. If a future mo
 
 ## Outputs and options
 
-Radiographs are converted to three-channel NIfTI in an isolated run folder inside `--scratch-dir`. Predictions are copied back into eight class directories under `<data-dir>/nnunet_masks`, using the original filenames. No output argument is required. If this directory already exists, a new `nnunet_masks_<UTC timestamp>` directory is used. An explicitly supplied `--output-dir` must not already exist.
+Radiographs are converted to three-channel NIfTI under `<scratch-dir>/perthesmetrics/input/imagesTs`. On later runs, the script reuses this cache when the source filenames, dimensions, file sizes, and modification times still match and all three NIfTI channels are present. If the source inputs change, the cache is rebuilt automatically.
 
-Only the isolated scratch run folder is deleted after success; other contents of the scratch parent are preserved. `--keep-scratch` retains the run folder, and failures also retain it for inspection. Each run stages its own inputs and model; scratch folders are not resumed automatically.
+Every run writes masks to a new `<data-dir>/nnunet_masks_<UTC timestamp>` directory, using the original filenames, so an earlier result is never overwritten. An explicitly supplied `--output-dir` must not already exist. The reusable scratch workspace is always retained. Runtime predictions and the installed model remain under `<scratch-dir>/perthesmetrics/runtime` and are reused when they match the current inputs and model.
 
-The default, `--device auto`, uses CUDA when a real CUDA allocation succeeds and otherwise falls back to CPU. Use `--device cuda` to require CUDA and fail rather than fall back, or `--device cpu` to force CPU inference. Add `--gpu 0` to select a GPU, `--output-dir <path>` to select another destination, or `--keep-scratch` to retain intermediate NIfTI files. Hugging Face authentication is only needed if the model repository is made private; in that case, run `hf auth login` first.
+The default, `--device auto`, uses CUDA when a real CUDA allocation succeeds and otherwise falls back to CPU. Use `--device cuda` to require CUDA and fail rather than fall back, or `--device cpu` to force CPU inference. Add `--gpu 0` to select a GPU or `--output-dir <path>` to select another destination. Hugging Face authentication is only needed if the model repository is made private; in that case, run `hf auth login` first.
 
 With CUDA selected, the script verifies a real CUDA tensor allocation and prints the GPU name before converting any images. It also launches the nnU-Net executable from the same Python environment, preventing a CPU-only nnU-Net installation elsewhere on `PATH` from being selected accidentally. Image decoding, NIfTI preprocessing, resampling, and BMP mask export still use CPU by nnU-Net design; the neural-network forward passes and sliding-window accumulation use the reported CUDA device.
-
-## Class-specific Grad-CAM
-
-Add `--gradcam` to generate 2D Seg-Grad-CAM attribution maps with the trained model. From PowerShell:
-
-```powershell
-python inference/run_inference.py `
-  --data-dir "<SOURCE_DATA_DIR>" `
-  --scratch-dir "<SCRATCH_DIR>" `
-  --model-zip "<MODEL_ZIP>" `
-  --device cuda `
-  --gradcam
-```
-
-The normal class masks and a `gradcam/` subdirectory are copied back together. Grad-CAM is computed for every foreground class present in each image, with one directory per class using the same names as the mask directories:
-
-```text
-<SOURCE_DATA_DIR>/nnunet_masks/
-  acetabulum/<original filename>
-  head/<original filename>
-  ...
-  gradcam/
-    acetabulum/<case_id>_raw.npy
-    acetabulum/<case_id>_heatmap.png
-    acetabulum/<case_id>_overlay.png
-    head/...
-    manifest.json
-    case_status.csv
-```
-
-Each raw map is a float32 array in the original radiograph's height/width and orientation. PNG heatmaps use a fixed black-red-yellow-white palette; overlays add the predicted mask contour in cyan. Display values are divided by the maximum for that image/class after aggregation. Raw arrays preserve the unnormalized values. Colors are not comparable confidence scores across classes or images. Absent classes are recorded without creating heatmaps; zero gradients, zero positive attribution, and masks lost during resampling have distinct status entries.
-
-| Option | Behavior |
-|---|---|
-| `--gradcam-classes 1 3 7` | Explain only selected IDs (default: all eight; see the root README for IDs). |
-| `--gradcam-cases <case_id>` | Explain selected normalized filename stems; segmentation still processes all root images. IDs are recorded in `inference_manifest.csv`. |
-| `--gradcam-layer <module_name>` | Select a feature module. Default: third decoder stage from the output, quarter resolution for the released architecture (`decoder.stages.4`). |
-| `--folds 0` | Use selected folds for both segmentation and attribution (default: all available). |
-| `--disable-tta` | Disable mirroring for both segmentation and attribution. |
-
-For an initial development pilot, add `--folds 0 --disable-tta` and select a few cases. Full runs default to all folds and checkpoint-supported mirroring, which requires substantially more computation. The quarter-resolution layer is an initial setting, not a validated optimal choice; select settings on development data before reviewing held-out test figures.
-
-Attribution uses the fixed exported class mask, resampled with nnU-Net into model space, to target the mean pre-softmax class score. Window target contributions account for Gaussian overlap coverage and the global class pixel count. Each window/fold/mirror branch produces a positive Grad-CAM; flips are reversed, windows are Gaussian blended, and mirror/fold maps are averaged before display normalization. The result is an aggregated branch attribution map, not an exact attribution of the final ensemble. RGB channels contribute jointly.
-
-The attribution pass uses float32, evaluation mode, and the checkpoint's preprocessing. Standard segmentation retains nnU-Net's existing precision and behavior. The manifest records the checkpoint hash, layer, classes, folds, mirroring, target, aggregation, display normalization, seed, device, and software versions. These maps describe contributions to segmentation scores; they do not establish causal reasoning or clinical validity. No additional package is required beyond the inference environment.
 
 ## Optional figure overlays
 
@@ -122,4 +77,4 @@ python inference\generate_figures.py ^
   --opacity 0.45
 ```
 
-Run inference with `--keep-scratch` when NIfTI predictions are needed for figures. The figure command is not part of inference.
+NIfTI predictions from the most recent run remain in `<scratch-dir>/perthesmetrics/runtime/predictions`. The figure command is not part of inference.

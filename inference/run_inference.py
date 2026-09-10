@@ -11,15 +11,23 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from perthesmetrics_io import LABELS, export_prediction_bmps, stage_bmp_inference_data
+from perthesmetrics_io import (
+    LABELS,
+    discover_radiographs,
+    export_prediction_bmps,
+    safe_case_id,
+    stage_bmp_inference_data,
+    write_conversion_manifest,
+)
 
 
 DEFAULT_MODEL_FILENAME = "perthesmetrics_nnunet_model.zip"
@@ -29,7 +37,10 @@ DEFAULT_MODEL_REPO = "vishalgokani/perthesmetrics-nnunet"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run PerthesMetrics 2D nnU-Net inference.")
     parser.add_argument("--data-dir", required=True, type=Path, help="Folder containing root radiograph BMP files.")
-    parser.add_argument("--scratch-dir", required=True, type=Path, help="Local SSD parent for an isolated run folder.")
+    parser.add_argument(
+        "--scratch-dir", required=True, type=Path,
+        help="Local SSD parent for the reusable perthesmetrics workspace.",
+    )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--model-zip", type=Path, help="Path to a local nnU-Net model export zip.")
     source.add_argument(
@@ -46,20 +57,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu", help="Optional CUDA_VISIBLE_DEVICES value.")
     parser.add_argument(
         "--output-dir", type=Path,
-        help="Optional output folder. Default: <data-dir>/nnunet_masks, with a timestamp if it exists.",
+        help="Optional output folder. Default: <data-dir>/nnunet_masks_<UTC timestamp>.",
     )
-    parser.add_argument("--keep-scratch", action="store_true")
-    parser.add_argument("--folds", nargs="+", type=int, help="Folds for prediction and attribution (default: all available).")
-    parser.add_argument("--disable-tta", action="store_true", help="Disable mirroring for prediction and attribution.")
-    parser.add_argument("--gradcam", action="store_true", help="Export class-specific 2D Grad-CAM maps and overlays.")
-    parser.add_argument("--gradcam-classes", nargs="+", type=int, choices=range(1, 9),
-                        help="Foreground class IDs to explain (default: 1 through 8).")
-    parser.add_argument("--gradcam-cases", nargs="+", help="Normalized case IDs to explain (default: all cases).")
-    parser.add_argument("--gradcam-layer", default="auto",
-                        help="Network module name (default: quarter-resolution decoder stage).")
+    parser.add_argument("--folds", nargs="+", type=int, help="Folds for prediction (default: all available).")
+    parser.add_argument("--disable-tta", action="store_true", help="Disable mirroring for prediction.")
     args = parser.parse_args()
-    if not args.gradcam and (args.gradcam_classes or args.gradcam_cases or args.gradcam_layer != "auto"):
-        parser.error("Grad-CAM options require --gradcam.")
     return args
 
 
@@ -75,16 +77,91 @@ def prepare_scratch(path: Path) -> Path:
     if path.anchor == str(path):
         raise ValueError(f"Refusing to use filesystem root as scratch: {path}")
     path.mkdir(parents=True, exist_ok=True)
-    return Path(tempfile.mkdtemp(prefix="perthesmetrics_", dir=path)).resolve()
+    scratch = (path / "perthesmetrics").resolve()
+    scratch.mkdir(parents=True, exist_ok=True)
+    return scratch
 
 
 def resolve_output(data_dir: Path, requested: Path | None) -> Path:
-    output = requested.resolve() if requested else data_dir / "nnunet_masks"
-    if output.exists() and requested is None:
-        output = data_dir / f"nnunet_masks_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
+    if requested:
+        output = requested.resolve()
+    else:
+        name = f"nnunet_masks_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
+        output = data_dir / name
+        sequence = 1
+        while output.exists():
+            output = data_dir / f"{name}_{sequence:02d}"
+            sequence += 1
     if output.exists():
         raise FileExistsError(f"Refusing to replace existing output: {output}.")
     return output
+
+
+def cached_input_mapping(data_dir: Path, images_ts: Path) -> dict[str, str] | None:
+    """Return the cached case mapping only when it matches all current inputs."""
+    manifest_path = images_ts.parent / "input_conversion_manifest.csv"
+    if not manifest_path.is_file() or not images_ts.is_dir():
+        return None
+    try:
+        with manifest_path.open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+        sources = discover_radiographs(data_dir)
+        if len(rows) != len(sources):
+            return None
+        by_filename = {row["source_filename"]: row for row in rows}
+        if set(by_filename) != {source.name for source in sources}:
+            return None
+        mapping: dict[str, str] = {}
+        for source in sources:
+            row = by_filename[source.name]
+            case_id = safe_case_id(source)
+            if row.get("case_id") != case_id:
+                return None
+            stat = source.stat()
+            fingerprinted = bool(row.get("source_size") and row.get("source_mtime_ns"))
+            if fingerprinted:
+                if int(row["source_size"]) != stat.st_size or int(row["source_mtime_ns"]) != stat.st_mtime_ns:
+                    return None
+            else:
+                with Image.open(source) as image:
+                    if int(row["width"]) != image.width or int(row["height"]) != image.height:
+                        return None
+            expected = {images_ts / f"{case_id}_{channel:04d}.nii.gz" for channel in range(3)}
+            if not all(path.is_file() for path in expected):
+                return None
+            mapping[case_id] = source.name
+        if len(list(images_ts.glob("*.nii.gz"))) != 3 * len(mapping):
+            return None
+        return mapping
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+
+
+def prepare_inputs(data_dir: Path, scratch: Path) -> tuple[Path, dict[str, str], bool]:
+    images_ts = scratch / "input" / "imagesTs"
+    mapping = cached_input_mapping(data_dir, images_ts)
+    if mapping is not None:
+        manifest_path = images_ts.parent / "input_conversion_manifest.csv"
+        with manifest_path.open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+        if rows and not all(row.get("source_size") and row.get("source_mtime_ns") for row in rows):
+            sources = {source.name: source for source in discover_radiographs(data_dir)}
+            for row in rows:
+                stat = sources[row["source_filename"]].stat()
+                row["source_size"] = stat.st_size
+                row["source_mtime_ns"] = stat.st_mtime_ns
+            write_conversion_manifest(manifest_path, rows)
+        return images_ts, mapping, True
+
+    staging = scratch / "input_staging"
+    if staging.exists():
+        remove(staging)
+    mapping = stage_bmp_inference_data(data_dir, staging / "imagesTs")
+    cached = scratch / "input"
+    if cached.exists():
+        remove(cached)
+    staging.rename(cached)
+    return cached / "imagesTs", mapping, False
 
 
 def executable(name: str) -> str:
@@ -134,7 +211,7 @@ def discover_cases(images_ts: Path) -> dict[str, list[Path]]:
 
 def get_model(args: argparse.Namespace, scratch: Path) -> Path:
     destination = scratch / "model" / DEFAULT_MODEL_FILENAME
-    destination.parent.mkdir(parents=True)
+    destination.parent.mkdir(parents=True, exist_ok=True)
     if args.model_zip:
         source = args.model_zip.resolve()
         if not source.is_file():
@@ -142,6 +219,9 @@ def get_model(args: argparse.Namespace, scratch: Path) -> Path:
     else:
         from huggingface_hub import hf_hub_download
         source = Path(hf_hub_download(repo_id=args.model_repo, filename=args.model_filename))
+    if destination.is_file() and sha256(destination) == sha256(source):
+        print(f"Reusing cached model archive: {destination}", flush=True)
+        return destination
     shutil.copy2(source, destination)
     return destination
 
@@ -207,9 +287,15 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def install_model(model_zip: Path, env: dict[str, str]) -> tuple[str, Path, list[str]]:
-    run(["nnUNetv2_install_pretrained_model_from_zip", str(model_zip)], env)
+def install_model(
+    model_zip: Path, env: dict[str, str], *, reuse_existing: bool = False,
+) -> tuple[str, Path, list[str]]:
     datasets = [path for path in Path(env["nnUNet_results"]).glob("Dataset*") if path.is_dir()]
+    if not (reuse_existing and datasets):
+        run(["nnUNetv2_install_pretrained_model_from_zip", str(model_zip)], env)
+        datasets = [path for path in Path(env["nnUNet_results"]).glob("Dataset*") if path.is_dir()]
+    else:
+        print("Reusing the installed nnU-Net model from the matching prior run.", flush=True)
     if len(datasets) != 1:
         raise ValueError(f"Expected one installed DatasetXXX_Name folder; found {[path.name for path in datasets]}")
     dataset = datasets[0]
@@ -233,6 +319,11 @@ def install_model(model_zip: Path, env: dict[str, str]) -> tuple[str, Path, list
     return str(int(match.group(1))), model, folds
 
 
+def predictions_complete(predictions: Path, case_to_filename: dict[str, str]) -> bool:
+    found = {path.name.removesuffix(".nii.gz") for path in predictions.glob("*.nii.gz")}
+    return found == set(case_to_filename)
+
+
 def main() -> int:
     args = parse_args()
     device = resolve_device(args.device, args.gpu)
@@ -242,40 +333,59 @@ def main() -> int:
     output = resolve_output(data_dir, args.output_dir)
     print(f"Results will be copied to: {output}", flush=True)
     scratch = prepare_scratch(args.scratch_dir)
-    completed = False
+    print(f"Reusable scratch workspace: {scratch}", flush=True)
+    runtime = scratch / "runtime"
+    runtime.mkdir(exist_ok=True)
     try:
         env = os.environ.copy()
         env.update({
-            "nnUNet_raw": str(scratch / "nnUNet_raw"),
-            "nnUNet_preprocessed": str(scratch / "nnUNet_preprocessed"),
-            "nnUNet_results": str(scratch / "nnUNet_results"),
+            "nnUNet_raw": str(runtime / "nnUNet_raw"),
+            "nnUNet_preprocessed": str(runtime / "nnUNet_preprocessed"),
+            "nnUNet_results": str(runtime / "nnUNet_results"),
         })
         for key in ("nnUNet_raw", "nnUNet_preprocessed", "nnUNet_results"):
-            Path(env[key]).mkdir(parents=True)
+            Path(env[key]).mkdir(parents=True, exist_ok=True)
         if args.gpu is not None:
             env["CUDA_VISIBLE_DEVICES"] = args.gpu
-        local_input = scratch / "input" / "imagesTs"
-        case_to_filename = stage_bmp_inference_data(data_dir, local_input)
-        if args.gradcam_cases:
-            unknown = set(args.gradcam_cases) - set(case_to_filename)
-            if unknown:
-                raise ValueError(f"Unknown --gradcam-cases: {sorted(unknown)}")
-        model_zip = get_model(args, scratch)
+        local_input, case_to_filename, reused_inputs = prepare_inputs(data_dir, scratch)
+        if reused_inputs:
+            print(f"Reusing {len(case_to_filename)} cached NIfTI inputs from: {local_input}", flush=True)
+        else:
+            print(f"Converted and cached {len(case_to_filename)} radiographs in: {local_input}", flush=True)
+        model_zip = get_model(args, runtime)
         model_hash = sha256(model_zip)
-        dataset_id, model_folder, folds = install_model(model_zip, env)
+        prior_manifest_path = runtime / "rendered_masks" / "inference_manifest.json"
+        prior_model_hash = None
+        if prior_manifest_path.is_file():
+            try:
+                prior_model_hash = json.loads(prior_manifest_path.read_text(encoding="utf-8")).get("model_sha256")
+            except (OSError, ValueError):
+                pass
+        reuse_runtime = prior_model_hash == model_hash
+        if not reuse_runtime:
+            for generated in (runtime / "predictions", runtime / "rendered_masks", Path(env["nnUNet_results"])):
+                if generated.exists():
+                    remove(generated)
+            Path(env["nnUNet_results"]).mkdir(parents=True)
+        dataset_id, model_folder, folds = install_model(model_zip, env, reuse_existing=reuse_runtime)
         if args.folds:
             selected = list(dict.fromkeys(str(fold) for fold in args.folds))
             if not set(selected).issubset(folds):
                 raise ValueError(f"Requested folds {selected}; available folds: {folds}")
             folds = selected
         trainer, plans, configuration = model_folder.name.split("__")
-        predictions = scratch / "predictions"
-        run([
-            "nnUNetv2_predict", "-d", dataset_id, "-i", str(local_input), "-o", str(predictions),
-            "-f", *folds, "-tr", trainer, "-c", configuration, "-p", plans, "-device", device,
-            *(["--disable_tta"] if args.disable_tta else []),
-        ], env)
-        rendered = scratch / "rendered_masks"
+        predictions = runtime / "predictions"
+        if predictions_complete(predictions, case_to_filename):
+            print(f"Reusing {len(case_to_filename)} complete segmentation predictions: {predictions}", flush=True)
+        else:
+            run([
+                "nnUNetv2_predict", "-d", dataset_id, "-i", str(local_input), "-o", str(predictions),
+                "-f", *folds, "-tr", trainer, "-c", configuration, "-p", plans, "-device", device,
+                *(["--disable_tta"] if args.disable_tta else []),
+            ], env)
+        rendered = runtime / "rendered_masks"
+        if rendered.exists():
+            remove(rendered)
         rows = export_prediction_bmps(predictions, rendered, case_to_filename, LABELS)
         with (rendered / "inference_manifest.csv").open("w", newline="", encoding="utf-8") as stream:
             writer = csv.DictWriter(stream, fieldnames=["case_id", "source_filename"])
@@ -284,39 +394,16 @@ def main() -> int:
             "created_utc": datetime.now(timezone.utc).isoformat(), "num_cases": len(case_to_filename),
             "model_sha256": model_hash, "installed_model": model_folder.name, "folds": folds,
             "configuration": configuration, "device": device, "requested_device": args.device,
-            "mirroring": not args.disable_tta, "gradcam": args.gradcam,
+            "mirroring": not args.disable_tta,
             "labels": {str(value): name for name, value in LABELS.items()},
             "output_format": "one binary BMP per foreground class and source radiograph",
         }
         (rendered / "inference_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        if args.gradcam:
-            worker_env = env.copy()
-            worker_env["nnUNet_compile"] = "false"
-            command = [
-                sys.executable, str(Path(__file__).with_name("gradcam_worker.py")),
-                "--model-folder", str(model_folder), "--images-dir", str(local_input),
-                "--predictions-dir", str(predictions), "--source-dir", str(data_dir),
-                "--output-dir", str(rendered / "gradcam"), "--device", device,
-                "--folds", *folds, "--layer", args.gradcam_layer, "--model-sha256", model_hash,
-            ]
-            if args.disable_tta:
-                command.append("--disable-tta")
-            if args.gradcam_classes:
-                command.extend(["--classes", *map(str, args.gradcam_classes)])
-            if args.gradcam_cases:
-                command.extend(["--cases", *args.gradcam_cases])
-            subprocess.run(command, env=worker_env, check=True)
         shutil.copytree(rendered, output)
         print(f"Copied {len(rows)} predictions as class BMP masks to: {output}")
-        completed = True
     finally:
-        if scratch.exists() and completed and not args.keep_scratch:
-            if scratch.parent != args.scratch_dir.resolve() or not scratch.name.startswith("perthesmetrics_"):
-                raise RuntimeError(f"Refusing to clean unexpected scratch path: {scratch}")
-            remove(scratch)
-            print(f"Deleted scratch directory: {scratch}")
-        elif scratch.exists():
-            print(f"Kept scratch directory for inspection: {scratch}")
+        if runtime.exists():
+            print(f"Kept scratch workspace: {scratch}")
     return 0
 
 
