@@ -6,6 +6,7 @@ from PIL import Image
 from tools.cropper import crop_images, square_box_from_drag, validate_inputs
 from tools.waldenstrom_figure_builder import (
     IMAGE_COUNT,
+    ORIGINAL_MASK_LAYOUT,
     build_svg,
     export_png_and_pdf,
     validate_images,
@@ -32,7 +33,7 @@ def test_crop_images_applies_same_square_box(tmp_path: Path) -> None:
     assert [Image.open(path).size for path in outputs] == [(12, 12), (12, 12)]
 
 
-def test_builder_requires_28_square_images(tmp_path: Path) -> None:
+def test_builder_requires_42_square_images(tmp_path: Path) -> None:
     paths = [make_image(tmp_path / f"panel_{index}.png", (10, 10)) for index in range(IMAGE_COUNT)]
     validate_images(paths)
     svg = tmp_path / "figure.svg"
@@ -40,8 +41,14 @@ def test_builder_requires_28_square_images(tmp_path: Path) -> None:
     text = svg.read_text(encoding="utf-8")
     assert text.count("data:image/png;base64,") == IMAGE_COUNT * 2
     assert "Frog-leg lateral" in text
+    assert "Original" in text
 
-    with pytest.raises(ValueError, match="Exactly 28"):
+    compact_svg = tmp_path / "compact.svg"
+    build_svg(paths, compact_svg, ORIGINAL_MASK_LAYOUT)
+    compact_text = compact_svg.read_text(encoding="utf-8")
+    assert compact_text.count("data:image/png;base64,") == 28 * 2
+
+    with pytest.raises(ValueError, match="Exactly 42"):
         validate_images(paths[:-1])
 
 
@@ -50,5 +57,19 @@ def test_builder_exports_matching_png_and_pdf(tmp_path: Path) -> None:
     prefix = tmp_path / "waldenstrom"
     build_svg(paths, prefix.with_suffix(".svg"))
     export_png_and_pdf(prefix.with_suffix(".svg"), prefix, dpi=72)
-    assert Image.open(prefix.with_suffix(".png")).size == (510, 709)
+    assert Image.open(prefix.with_suffix(".png")).size == (510, 577)
     assert prefix.with_suffix(".pdf").read_bytes().startswith(b"%PDF")
+
+
+def test_builder_can_mirror_selected_stage(tmp_path: Path) -> None:
+    paths = [make_image(tmp_path / f"panel_{index}.png", (10, 10)) for index in range(IMAGE_COUNT)]
+    asymmetric = Image.new("RGB", (10, 10), "black")
+    for y in range(10):
+        asymmetric.putpixel((0, y), (255, 255, 255))
+    asymmetric.save(paths[0])
+
+    normal_svg = tmp_path / "normal.svg"
+    flipped_svg = tmp_path / "flipped.svg"
+    build_svg(paths, normal_svg)
+    build_svg(paths, flipped_svg, flip_stages=frozenset({"I-A"}))
+    assert normal_svg.read_bytes() != flipped_svg.read_bytes()
