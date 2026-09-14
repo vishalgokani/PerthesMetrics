@@ -76,12 +76,11 @@ Waldenstrom-stage AP/frog boxplots, and optional mask overlay figures. See
 [testing/final_mask_analysis/README.md](testing/final_mask_analysis/README.md).
 
 To prepare publication panels, use `tools/cropper.py` to apply one interactive
-square crop to as many as ten same-sized images. Then pass 42 prepared panels to
-`tools/waldenstrom_figure_builder.py` in left-to-right, top-to-bottom order. The
-builder takes 42 panels (original, ground truth, and mask for AP and frog-leg at
-each stage) and creates both a six-column full figure and a four-column
-original/mask-only figure. Each is written as a self-contained SVG, 600-DPI PNG,
-and PDF; run each script with `--help` for the full CLI and panel order.
+square crop to as many as ten same-sized images. The Waldenstrom figure builder
+discovers original, ground-truth, and nnU-Net panels by filename under stage
+folders `1a`, `1b`, `2a`, `2b`, `3a`, `3b`, and `4`. It writes a self-contained
+SVG, 600-DPI PNG, and PDF; run `tools/waldenstrom_figure_builder.py --help` for
+the CLI.
 
 ## Intended use
 

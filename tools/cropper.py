@@ -3,6 +3,34 @@
 The crop is selected on the first image and applied at the same pixel
 coordinates to every input. Outputs are PNG files so they can be passed
 directly to publication-figure tools without modifying the source images.
+
+Usage
+-----
+Run this script from the repository root and provide 1-10 input image paths.
+Every input must have identical pixel dimensions because the same crop
+coordinates are used for all images.
+
+Windows PowerShell example using portable placeholder directories::
+
+    python tools/cropper.py "<INPUT_DIR>\\image_01.png" "<INPUT_DIR>\\image_02.png" --output-dir "<OUTPUT_DIR>"
+
+Replace ``<INPUT_DIR>`` with the directory containing the source images and
+``<OUTPUT_DIR>`` with the directory where cropped files should be written. For
+example::
+
+    python tools/cropper.py "C:\\path\\to\\input\\ap.png" "C:\\path\\to\\input\\frog_leg.png" --output-dir "C:\\path\\to\\output"
+
+In the window that opens:
+
+1. Drag with the left mouse button to draw a square crop on the first image.
+2. Click ``Confirm`` or press Enter to apply it to every image.
+3. Click ``Redraw`` or press R to select again; press Escape to cancel.
+
+By default, an input named ``image_01.png`` produces
+``<OUTPUT_DIR>\\image_01_cropped.png``. The output directory also receives a
+JSON file recording the crop coordinates and filenames. Use ``--suffix`` to
+change ``_cropped`` and ``--metadata-name`` to choose the JSON filename. Run
+``python tools/cropper.py --help`` for the complete command-line reference.
 """
 
 from __future__ import annotations

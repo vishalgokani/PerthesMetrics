@@ -5,17 +5,27 @@ from PIL import Image
 
 from tools.cropper import crop_images, square_box_from_drag, validate_inputs
 from tools.waldenstrom_figure_builder import (
+    CANVAS_HEIGHT,
     IMAGE_COUNT,
-    ORIGINAL_MASK_LAYOUT,
     build_svg,
+    discover_images,
     export_png_and_pdf,
     validate_images,
 )
 
 
 def make_image(path: Path, size: tuple[int, int] = (30, 20)) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", size, "white").save(path)
     return path
+
+
+def make_figure_inputs(root: Path) -> list[Path]:
+    for stage in ("1a", "1b", "2a", "2b", "3a", "3b", "4"):
+        for view in ("ap", "frog"):
+            for kind in ("original", "ground_truth_masks", "nnunet_masks"):
+                make_image(root / stage / f"case_{view}_{kind}_cropped.png", (10, 10))
+    return discover_images(root)
 
 
 def test_square_box_stays_inside_image() -> None:
@@ -33,43 +43,45 @@ def test_crop_images_applies_same_square_box(tmp_path: Path) -> None:
     assert [Image.open(path).size for path in outputs] == [(12, 12), (12, 12)]
 
 
-def test_builder_requires_42_square_images(tmp_path: Path) -> None:
-    paths = [make_image(tmp_path / f"panel_{index}.png", (10, 10)) for index in range(IMAGE_COUNT)]
+def test_builder_discovers_42_images_in_panel_order(tmp_path: Path) -> None:
+    paths = make_figure_inputs(tmp_path)
+    assert len(paths) == IMAGE_COUNT
+    assert [path.parent.name for path in paths[:6]] == ["1a"] * 6
+    assert [path.name for path in paths[:6]] == [
+        "case_ap_original_cropped.png",
+        "case_ap_ground_truth_masks_cropped.png",
+        "case_ap_nnunet_masks_cropped.png",
+        "case_frog_original_cropped.png",
+        "case_frog_ground_truth_masks_cropped.png",
+        "case_frog_nnunet_masks_cropped.png",
+    ]
     validate_images(paths)
+
+
+def test_builder_rejects_missing_panel(tmp_path: Path) -> None:
+    make_figure_inputs(tmp_path)
+    (tmp_path / "1a" / "case_ap_original_cropped.png").unlink()
+    with pytest.raises(ValueError, match="Expected exactly one Ia AP original"):
+        discover_images(tmp_path)
+
+
+def test_builder_embeds_images_and_uses_compact_stage_labels(tmp_path: Path) -> None:
+    paths = make_figure_inputs(tmp_path)
     svg = tmp_path / "figure.svg"
     build_svg(paths, svg)
     text = svg.read_text(encoding="utf-8")
     assert text.count("data:image/png;base64,") == IMAGE_COUNT * 2
-    assert "Frog-leg lateral" in text
-    assert "Original" in text
-
-    compact_svg = tmp_path / "compact.svg"
-    build_svg(paths, compact_svg, ORIGINAL_MASK_LAYOUT)
-    compact_text = compact_svg.read_text(encoding="utf-8")
-    assert compact_text.count("data:image/png;base64,") == 28 * 2
-
-    with pytest.raises(ValueError, match="Exactly 42"):
-        validate_images(paths[:-1])
+    assert ">IIa</text>" in text
+    assert ">IIIb</text>" in text
 
 
-def test_builder_exports_matching_png_and_pdf(tmp_path: Path) -> None:
-    paths = [make_image(tmp_path / f"panel_{index}.png", (10, 10)) for index in range(IMAGE_COUNT)]
+def test_builder_exports_png_and_pdf(tmp_path: Path) -> None:
+    paths = make_figure_inputs(tmp_path / "inputs")
     prefix = tmp_path / "waldenstrom"
     build_svg(paths, prefix.with_suffix(".svg"))
     export_png_and_pdf(prefix.with_suffix(".svg"), prefix, dpi=72)
-    assert Image.open(prefix.with_suffix(".png")).size == (510, 577)
+    assert Image.open(prefix.with_suffix(".png")).size == (
+        510,
+        round((CANVAS_HEIGHT / 10) / 25.4 * 72),
+    )
     assert prefix.with_suffix(".pdf").read_bytes().startswith(b"%PDF")
-
-
-def test_builder_can_mirror_selected_stage(tmp_path: Path) -> None:
-    paths = [make_image(tmp_path / f"panel_{index}.png", (10, 10)) for index in range(IMAGE_COUNT)]
-    asymmetric = Image.new("RGB", (10, 10), "black")
-    for y in range(10):
-        asymmetric.putpixel((0, y), (255, 255, 255))
-    asymmetric.save(paths[0])
-
-    normal_svg = tmp_path / "normal.svg"
-    flipped_svg = tmp_path / "flipped.svg"
-    build_svg(paths, normal_svg)
-    build_svg(paths, flipped_svg, flip_stages=frozenset({"I-A"}))
-    assert normal_svg.read_bytes() != flipped_svg.read_bytes()
