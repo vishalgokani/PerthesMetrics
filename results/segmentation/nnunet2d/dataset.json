@@ -17,17 +17,6 @@
   },
   "numTraining": 9319,
   "file_ending": ".nii.gz",
-  "name": "AureliusAnalytics",
-  "description": "AureliusAnalytics",
-  "region_class_order": {
-    "background": 0,
-    "acetabulum": 1,
-    "gt": 2,
-    "head": 3,
-    "lt": 4,
-    "neck": 5,
-    "shaft": 6,
-    "sourcil": 7,
-    "triradiate cartilage": 8
-  }
+  "name": "Dataset001_PerthesMetrics",
+  "description": "Multiclass anatomic segmentation of RGB pediatric hip radiographs in Perthes disease"
 }

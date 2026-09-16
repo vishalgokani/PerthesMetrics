@@ -12,6 +12,8 @@ This folder contains release infrastructure, not model weights. The intended hos
 perthesmetrics_nnunet_model.zip
 ```
 
+See [model_card.md](model_card.md) for the model's intended use, inputs, outputs, and limitations.
+
 Prepare an nnU-Net export for Hugging Face or another artifact host:
 
 ```bat

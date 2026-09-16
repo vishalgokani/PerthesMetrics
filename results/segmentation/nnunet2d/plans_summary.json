@@ -1,5 +1,5 @@
 {
-  "dataset_name": "Dataset501_Glioblastoma",
+  "dataset_name": "Dataset001_PerthesMetrics",
   "plans_name": "nnUNetPlans",
   "configuration": "2d",
   "patch_size": [

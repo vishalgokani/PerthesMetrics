@@ -52,7 +52,7 @@ def normalize_json(relative: str, data: bytes) -> bytes:
     payload = json.loads(data.decode("utf-8"))
     if relative == "dataset.json":
         payload.update({
-            "name": "PerthesMetrics",
+            "name": DATASET,
             "description": "Multiclass anatomic segmentation of RGB pediatric hip radiographs in Perthes disease",
             "channel_names": CHANNELS,
             "labels": LABELS,
@@ -78,8 +78,12 @@ def validate_archive(path: Path) -> dict[str, object]:
             raise ValueError(f"Release archive is missing: {missing}")
         dataset = json.loads(archive.read(root + "dataset.json"))
         plans = json.loads(archive.read(root + "plans.json"))
-        if dataset.get("labels") != LABELS or dataset.get("channel_names") != CHANNELS:
-            raise ValueError("Release dataset.json has an incorrect label or channel map.")
+        if (
+            dataset.get("name") != DATASET
+            or dataset.get("labels") != LABELS
+            or dataset.get("channel_names") != CHANNELS
+        ):
+            raise ValueError("Release dataset.json has an incorrect identity, label map, or channel map.")
         if plans.get("dataset_name") != DATASET or "2d" not in plans.get("configurations", {}):
             raise ValueError("Release plans.json has an incorrect dataset identity or configuration.")
         return {"entries": len(names), "folds": [0, 1, 2, 3, 4], "dataset": DATASET, "model": MODEL}

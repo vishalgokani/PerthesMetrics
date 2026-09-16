@@ -21,6 +21,8 @@ LABELS = {
     "1": "acetabulum", "2": "gt", "3": "head", "4": "lt", "5": "neck",
     "6": "shaft", "7": "sourcil", "8": "triradiate_cartilage",
 }
+DATASET = "Dataset001_PerthesMetrics"
+DATASET_DESCRIPTION = "Multiclass anatomic segmentation of RGB pediatric hip radiographs in Perthes disease"
 
 
 def archive_root(names: set[str]) -> str:
@@ -35,6 +37,14 @@ def aggregate_summary(summary: dict[str, Any]) -> dict[str, Any]:
         "foreground_mean": summary.get("foreground_mean", {}),
         "label_means": {LABELS.get(str(key), str(key)): value for key, value in summary.get("mean", {}).items()},
     }
+
+
+def canonical_dataset_metadata(dataset: dict[str, Any]) -> dict[str, Any]:
+    """Return publication metadata with the canonical PerthesMetrics identity."""
+    output = dict(dataset)
+    output.update({"name": DATASET, "description": DATASET_DESCRIPTION})
+    output.pop("region_class_order", None)
+    return output
 
 
 def metric_rows(name: str, aggregate: dict[str, Any]) -> list[dict[str, Any]]:
@@ -111,12 +121,12 @@ def main() -> int:
     with zipfile.ZipFile(args.model_zip.resolve()) as archive:
         names = set(archive.namelist())
         ROOT = archive_root(names)
-        dataset = json.loads(archive.read(ROOT + "dataset.json"))
+        dataset = canonical_dataset_metadata(json.loads(archive.read(ROOT + "dataset.json")))
         plans = json.loads(archive.read(ROOT + "plans.json"))
         write_json(destination / "dataset.json", dataset)
         two_d = plans.get("configurations", {}).get("2d", {})
         write_json(destination / "plans_summary.json", {
-            "dataset_name": plans.get("dataset_name"), "plans_name": plans.get("plans_name"),
+            "dataset_name": DATASET, "plans_name": plans.get("plans_name"),
             "configuration": "2d", "patch_size": two_d.get("patch_size"), "batch_size": two_d.get("batch_size"),
             "labels": dataset.get("labels"), "channel_names": dataset.get("channel_names"),
         })

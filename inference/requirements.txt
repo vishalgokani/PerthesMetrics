@@ -1,6 +1,0 @@
-# Install the correct CUDA-compatible PyTorch build separately before this file.
-nnunetv2==2.5.1
-nibabel>=5.0,<6
-SimpleITK>=2.2,<3
-huggingface_hub>=0.24,<2
-Pillow>=10,<13

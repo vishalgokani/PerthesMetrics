@@ -1,6 +1,6 @@
 # PerthesMetrics
 
-Reproducible 2D nnU-Net v2 training, inference, model-release, and publication-results tools for multiclass segmentation of pediatric hip radiographs in Legg-Calve-Perthes disease.
+Reproducible 2D nnU-Net v2 training, inference, model-release, and publication-results tools for multiclass segmentation of pediatric hip radiographs in Legg-Calvé-Perthes disease.
 
 Run all commands from the repository root:
 
@@ -38,13 +38,13 @@ No patient data or model weights are committed. Keep source data on a network dr
 From an Anaconda Prompt, create the pinned CUDA environment:
 
 ```bat
-conda env create -f training\environment.yml
+conda env create -f environment.yml
 conda activate perthesmetrics
 ```
 
 The reference environment uses Python 3.12, PyTorch 2.5.1 with CUDA 12.4, and nnU-Net v2.5.1. The training script checks CUDA support before touching scratch data and reports an actionable error if a CPU-only PyTorch build is active.
 
-If installing with `pip` instead, install the CUDA-compatible PyTorch build for your system from the [PyTorch installation guide](https://pytorch.org/get-started/locally/) **before** installing a requirements file. PyTorch is intentionally not listed in the repository requirements files because its correct package depends on the user's CUDA setup.
+If installing with `pip` instead, install the CUDA-compatible PyTorch build for your system from the [PyTorch installation guide](https://pytorch.org/get-started/locally/) **before** running `pip install -r requirements.txt`. PyTorch is intentionally not listed in `requirements.txt` because its correct package depends on the user's CUDA setup.
 
 ## Train
 
