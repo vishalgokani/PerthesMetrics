@@ -49,7 +49,7 @@ python tools\final_mask_analysis.py ^
 ## Main outputs
 
 - `overall_model_performance_by_mask.csv`: overall patient-pooled Dice and 95%
-  CI for each mask, plus patient pass-rate CIs for Dice cutoffs 0.90 and 0.80.
+  CI for each mask, plus patient pass-rate CIs for the Dice cutoff 0.80.
 - `overall_model_performance_publication_table.{csv,md,tex,pdf,svg}`:
   patient-bootstrapped Dice, IoU, precision, and recall with 95% CIs and patient
   counts. The PDF/SVG versions use Times New Roman.
@@ -80,10 +80,11 @@ python tools\final_mask_analysis.py ^
   bootstraps.
 - `analysis_group_view_boxplots.{png,pdf,svg}`: AP/Frog boxplot figure with no
   cutoff reference line.
-- `analysis_group_view_boxplots_cutoff_0_90.{png,pdf,svg}` and
-  `analysis_group_view_boxplots_cutoff_0_80.{png,pdf,svg}`: the same boxplots
-  with dashed Dice cutoff lines. In every version, the first row is unaffected
-  hips, followed by affected hips split into Waldenstrom stages.
+- `analysis_group_view_boxplots_cutoff_0_80.{png,pdf,svg}`: the same boxplots
+  with a dashed Dice cutoff line. In both versions, the first row is unaffected
+  hips, followed by affected hips split into Waldenstrom stages. AP panels show
+  all seven analysis structures; frog-leg panels omit the lesser and greater
+  trochanters because those structures are not reported for the lateral view.
 - `mask_figures_stratified/`: optional overlay copies organized as
   `<view>/<waldenstrom_class>/...`, using `ap_classes.csv` and
   `frog_classes.csv`.
@@ -121,7 +122,7 @@ python tools\create_mask_overlays.py ^
   --stratify
 ```
 
-To re-render only the Waldenstrom publication table and the three boxplot
+To re-render only the Waldenstrom publication table and both boxplot
 variants from their existing CSV files, without reading any image or mask, run:
 
 ```bat
@@ -132,3 +133,26 @@ python tools\final_mask_analysis.py ^
 
 This overwrites only the PDF, SVG, and PNG renderings of those outputs. It does
 not recalculate metrics or change the saved CSV, Markdown, or TeX tables.
+
+To re-render only the no-cutoff and 0.80-cutoff boxplots from the existing
+patient-level CSV, use:
+
+```bat
+python tools\final_mask_analysis.py ^
+  --render-boxplots-only ^
+  --output-dir "<OUTPUT_DIR>"
+```
+
+To print only the global median across all finite patient-mask Dice values and
+its patient-clustered bootstrap 95% CI, without recalculating or writing any
+other output, use:
+
+```bat
+python tools\final_mask_analysis.py ^
+  --global-median-only ^
+  --output-dir "<OUTPUT_DIR>"
+```
+
+The point estimate pools the patient-level Dice observations for all seven
+analysis masks. The confidence interval resamples patients with replacement so
+that mask observations from the same patient remain clustered.

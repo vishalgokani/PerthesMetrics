@@ -12,6 +12,7 @@ import csv
 import math
 import re
 import shutil
+import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +46,13 @@ ANALYSIS_MASK_ORDER = [
     "triradiate cartilage",
     "lt",
     "gt",
+]
+FROG_PLOT_MASK_ORDER = [
+    "acetabulum",
+    "head",
+    "neck_shaft",
+    "sourcil",
+    "triradiate cartilage",
 ]
 CLASS_ORDER = OVERLAY_CLASS_ORDER
 CLASS_DISPLAY = {
@@ -560,6 +568,49 @@ def bootstrap_ci(values: np.ndarray, iterations: int, rng: np.random.Generator) 
     return tuple(float(value) for value in np.percentile(means, [2.5, 97.5]))
 
 
+def summarize_global_patient_mask_dice(
+    rows: list[PatientMaskDice],
+    iterations: int,
+    seed: int,
+) -> dict[str, object]:
+    """Summarize all patient-mask Dice values with a patient-clustered CI."""
+    values_by_patient: dict[str, list[float]] = defaultdict(list)
+    for row in rows:
+        if math.isfinite(row.dice):
+            values_by_patient[row.patient_id].append(row.dice)
+    if not values_by_patient:
+        raise ValueError("No finite patient-level Dice values were available for the global summary.")
+
+    patient_ids = sorted(values_by_patient)
+    patient_values = [np.asarray(values_by_patient[patient_id], dtype=float) for patient_id in patient_ids]
+    pooled_values = np.concatenate(patient_values)
+    median = float(np.median(pooled_values))
+
+    if len(patient_values) == 1 or iterations <= 0:
+        ci_low = median
+        ci_high = median
+    else:
+        rng = np.random.default_rng(seed)
+        bootstrap_medians = np.empty(iterations, dtype=float)
+        for iteration in range(iterations):
+            sampled_indices = rng.integers(0, len(patient_values), size=len(patient_values))
+            sampled_values = np.concatenate([patient_values[index] for index in sampled_indices])
+            bootstrap_medians[iteration] = np.median(sampled_values)
+        ci_low, ci_high = (
+            float(value) for value in np.percentile(bootstrap_medians, [2.5, 97.5])
+        )
+
+    return {
+        "scope": "global_all_masks",
+        "n_patients": len(patient_ids),
+        "n_patient_mask_observations": int(pooled_values.size),
+        "median_patient_pooled_dice": median,
+        "ci95_low": ci_low,
+        "ci95_high": ci_high,
+        "bootstrap_iterations": iterations,
+    }
+
+
 def summarize_patient_rows(
     rows: list[PatientMaskDice],
     output_scope: str,
@@ -742,6 +793,11 @@ def analysis_group_sort_key(value: object) -> int:
         return len(ANALYSIS_GROUP_ORDER)
 
 
+def plot_mask_order(view: str) -> list[str]:
+    """Return structures appropriate for a radiograph view."""
+    return FROG_PLOT_MASK_ORDER if view == "frog" else ANALYSIS_MASK_ORDER
+
+
 def format_metric_ci(row: dict[str, object], metric: str, digits: int = 2) -> str:
     return (
         f"{format_decimal(row[f'mean_patient_pooled_{metric}'], digits)} "
@@ -899,10 +955,12 @@ def write_publication_table_figure(
             if column_index == 0:
                 cell.get_text().set_ha("left")
         path.parent.mkdir(parents=True, exist_ok=True)
-        figure.savefig(path.with_suffix(".png"), dpi=300, bbox_inches="tight")
-        figure.savefig(path.with_suffix(".svg"), bbox_inches="tight")
-        figure.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
-        plt.close(figure)
+        try:
+            atomic_savefig(figure, path.with_suffix(".pdf"), bbox_inches="tight")
+            atomic_savefig(figure, path.with_suffix(".svg"), bbox_inches="tight")
+            atomic_savefig(figure, path.with_suffix(".png"), dpi=300, bbox_inches="tight")
+        finally:
+            plt.close(figure)
 
 
 def write_publication_table_bundle(
@@ -947,6 +1005,27 @@ def rgb01(color: tuple[int, int, int]) -> tuple[float, float, float]:
     return tuple(channel / 255.0 for channel in color)
 
 
+def atomic_savefig(figure: plt.Figure, path: Path, **kwargs: object) -> None:
+    """Write a figure completely before atomically replacing its destination."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{path.stem}.",
+        suffix=path.suffix,
+        dir=path.parent,
+        delete=False,
+    ) as stream:
+        temporary_path = Path(stream.name)
+    try:
+        figure.savefig(temporary_path, **kwargs)
+        temporary_path.replace(path)
+    except PermissionError as error:
+        raise PermissionError(
+            f"Could not replace {path}. Close any application displaying that file and rerun the command."
+        ) from error
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 def plot_stage_view_boxplots(
     path: Path,
     rows: list[PatientMaskDice],
@@ -961,7 +1040,7 @@ def plot_stage_view_boxplots(
         len(ANALYSIS_GROUP_ORDER),
         len(VIEW_ORDER),
         figsize=(10.5, 1.8 * len(ANALYSIS_GROUP_ORDER)),
-        sharex=True,
+        sharex=False,
         sharey=True,
     )
     figure.subplots_adjust(left=0.09, right=0.99, top=0.96, bottom=0.13, hspace=0.30, wspace=0.12)
@@ -973,9 +1052,10 @@ def plot_stage_view_boxplots(
     for row_index, analysis_group in enumerate(ANALYSIS_GROUP_ORDER):
         for col_index, view in enumerate(VIEW_ORDER):
             axis = axes[row_index, col_index]
-            values_by_mask = [grouped.get((analysis_group, view, mask_name), []) for mask_name in ANALYSIS_MASK_ORDER]
-            positions = np.arange(1, len(ANALYSIS_MASK_ORDER) + 1)
-            for position, mask_name, values in zip(positions, ANALYSIS_MASK_ORDER, values_by_mask):
+            mask_order = plot_mask_order(view)
+            values_by_mask = [grouped.get((analysis_group, view, mask_name), []) for mask_name in mask_order]
+            positions = np.arange(1, len(mask_order) + 1)
+            for position, mask_name, values in zip(positions, mask_order, values_by_mask):
                 if not values:
                     continue
                 jitter = rng.uniform(-0.16, 0.16, size=len(values))
@@ -1006,7 +1086,7 @@ def plot_stage_view_boxplots(
             if cutoff is not None:
                 axis.axhline(cutoff, color="black", linestyle="--", linewidth=0.9)
             axis.set_ylim(-0.02, 1.02)
-            axis.set_xlim(0.4, len(ANALYSIS_MASK_ORDER) + 0.6)
+            axis.set_xlim(0.4, len(mask_order) + 0.6)
             axis.grid(axis="y", color="0.88", linewidth=0.6)
             axis.tick_params(axis="y", labelsize=9)
             if row_index == 0:
@@ -1016,7 +1096,7 @@ def plot_stage_view_boxplots(
             if row_index == len(ANALYSIS_GROUP_ORDER) - 1:
                 axis.set_xticks(positions)
                 axis.set_xticklabels(
-                    [CLASS_DISPLAY[name] for name in ANALYSIS_MASK_ORDER],
+                    [CLASS_DISPLAY[name] for name in mask_order],
                     rotation=38,
                     ha="right",
                     fontsize=9,
@@ -1053,10 +1133,12 @@ def plot_stage_view_boxplots(
         bbox_to_anchor=(0.5, 0.005),
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(path, dpi=300, bbox_inches="tight")
-    figure.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
-    figure.savefig(path.with_suffix(".svg"), bbox_inches="tight")
-    plt.close(figure)
+    try:
+        atomic_savefig(figure, path.with_suffix(".pdf"), bbox_inches="tight")
+        atomic_savefig(figure, path.with_suffix(".svg"), bbox_inches="tight")
+        atomic_savefig(figure, path, dpi=300, bbox_inches="tight")
+    finally:
+        plt.close(figure)
 
 
 def paint_solid_mask(canvas: np.ndarray, mask: np.ndarray, color: tuple[int, int, int]) -> np.ndarray:
@@ -1223,6 +1305,20 @@ def read_patient_mask_dice(path: Path) -> list[PatientMaskDice]:
     return rows
 
 
+def render_saved_boxplots(output_dir: Path, cutoffs: list[float], seed: int) -> None:
+    """Re-render all boxplot variants from the saved patient-level CSV only."""
+    patient_rows = read_patient_mask_dice(output_dir / "patient_pooled_dice_by_analysis_group_view.csv")
+    plot_stage_view_boxplots(output_dir / "analysis_group_view_boxplots.png", patient_rows, seed)
+    for cutoff in sorted({float(cutoff) for cutoff in cutoffs}, reverse=True):
+        plot_name = f"analysis_group_view_boxplots_cutoff_{cutoff:.2f}".replace(".", "_")
+        plot_stage_view_boxplots(
+            output_dir / f"{plot_name}.png",
+            patient_rows,
+            seed,
+            cutoff=cutoff,
+        )
+
+
 def render_saved_publication_outputs(output_dir: Path, cutoffs: list[float], seed: int) -> None:
     """Re-render the stage table and boxplots from existing analysis CSVs only."""
     analysis_group_summaries: list[dict[str, object]] = [
@@ -1241,16 +1337,17 @@ def render_saved_publication_outputs(output_dir: Path, cutoffs: list[float], see
         "Segmentation Performance by Waldenstrom Stage",
     )
 
-    patient_rows = read_patient_mask_dice(output_dir / "patient_pooled_dice_by_analysis_group_view.csv")
-    plot_stage_view_boxplots(output_dir / "analysis_group_view_boxplots.png", patient_rows, seed)
-    for cutoff in sorted({float(cutoff) for cutoff in cutoffs}, reverse=True):
-        plot_name = f"analysis_group_view_boxplots_cutoff_{cutoff:.2f}".replace(".", "_")
-        plot_stage_view_boxplots(
-            output_dir / f"{plot_name}.png",
-            patient_rows,
-            seed,
-            cutoff=cutoff,
-        )
+    render_saved_boxplots(output_dir, cutoffs, seed)
+
+
+def print_saved_global_median(output_dir: Path, iterations: int, seed: int) -> None:
+    """Print only the global patient-level median and patient-clustered 95% CI."""
+    patient_rows = read_patient_mask_dice(output_dir / "patient_pooled_dice_overall.csv")
+    summary = summarize_global_patient_mask_dice(patient_rows, iterations, seed)
+    print(
+        f"{float(summary['median_patient_pooled_dice']):.3f} "
+        f"[{float(summary['ci95_low']):.3f}-{float(summary['ci95_high']):.3f}]"
+    )
 
 
 def default_output_dir(data_dir: Path) -> Path:
@@ -1272,11 +1369,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, help="Output directory. Defaults to DATA_DIR/final_mask_analysis_outputs.")
     parser.add_argument("--bootstrap-iterations", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=20260906)
-    parser.add_argument("--cutoffs", nargs="+", type=float, default=[0.90, 0.80])
+    parser.add_argument("--cutoffs", nargs="+", type=float, default=[0.80])
     parser.add_argument(
         "--render-only",
         action="store_true",
         help="Re-render the Waldenstrom table and all boxplots from saved CSVs; do not read masks.",
+    )
+    parser.add_argument(
+        "--render-boxplots-only",
+        action="store_true",
+        help="Re-render only boxplots from the saved patient-level CSV; do not read masks or rewrite tables.",
+    )
+    parser.add_argument(
+        "--global-median-only",
+        action="store_true",
+        help=(
+            "Print only the global median of all patient-mask Dice values and its patient-clustered "
+            "confidence interval "
+            "from OUTPUT_DIR/patient_pooled_dice_overall.csv."
+        ),
     )
     parser.add_argument("--patient-regex", default=r"Patient[_ -]*(?P<patient_id>\d+)")
     parser.add_argument(
@@ -1290,15 +1401,26 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    if args.render_only:
+    saved_output_modes = [args.render_only, args.render_boxplots_only, args.global_median_only]
+    if sum(saved_output_modes) > 1:
+        parser.error("choose only one saved-output mode")
+    if not args.cutoffs or any(not math.isfinite(cutoff) or not 0.0 <= cutoff <= 1.0 for cutoff in args.cutoffs):
+        parser.error("--cutoffs must contain one or more finite values between 0 and 1")
+    if any(saved_output_modes):
         if args.output_dir is None:
-            parser.error("--render-only requires --output-dir")
+            parser.error("saved-output modes require --output-dir")
         output_dir = args.output_dir.resolve()
-        render_saved_publication_outputs(output_dir, args.cutoffs, args.seed)
-        print(f"Re-rendered publication outputs from existing CSVs in: {output_dir}")
+        if args.global_median_only:
+            print_saved_global_median(output_dir, args.bootstrap_iterations, args.seed)
+        elif args.render_boxplots_only:
+            render_saved_boxplots(output_dir, args.cutoffs, args.seed)
+            print(f"Re-rendered boxplots from the existing patient-level CSV in: {output_dir}")
+        else:
+            render_saved_publication_outputs(output_dir, args.cutoffs, args.seed)
+            print(f"Re-rendered publication outputs from existing CSVs in: {output_dir}")
         return 0
     if args.data_dir is None:
-        parser.error("--data-dir is required unless --render-only is used")
+        parser.error("--data-dir is required unless a render-only mode is used")
     data_dir = args.data_dir.resolve()
     gt_dir = (args.ground_truth_dir or data_dir / "masks").resolve()
     pred_dir = (args.prediction_dir or data_dir / "nnunet_masks").resolve()

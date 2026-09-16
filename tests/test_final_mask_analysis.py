@@ -9,13 +9,16 @@ from PIL import Image
 
 from tools.final_mask_analysis import (
     CLASS_ORDER,
+    build_parser,
     collect_image_mask_dice,
     missing_affected_stage_rows,
+    plot_mask_order,
     plot_stage_view_boxplots,
     pool_by_patient,
     read_radiograph_metadata,
     read_stage_maps,
     summarize_overall_metrics,
+    summarize_global_patient_mask_dice,
     summarize_patient_rows,
     unknown_affected_status_rows,
     write_publication_table_figure,
@@ -31,6 +34,16 @@ def write_mask(path: Path, active_pixels: list[tuple[int, int]]) -> None:
 
 
 class FinalMaskAnalysisTests(unittest.TestCase):
+    def test_plot_masks_are_view_specific(self) -> None:
+        self.assertEqual(plot_mask_order("ap")[-2:], ["lt", "gt"])
+        self.assertNotIn("lt", plot_mask_order("frog"))
+        self.assertNotIn("gt", plot_mask_order("frog"))
+        self.assertEqual(plot_mask_order("frog")[-1], "triradiate cartilage")
+
+    def test_publication_default_is_only_the_080_cutoff(self) -> None:
+        args = build_parser().parse_args([])
+        self.assertEqual(args.cutoffs, [0.80])
+
     def test_patient_pooling_combines_multiple_images_before_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -101,6 +114,10 @@ class FinalMaskAnalysisTests(unittest.TestCase):
             self.assertAlmostEqual(head_metrics["mean_patient_pooled_iou"], (3 / 4 + 3) / 4)
             self.assertAlmostEqual(head_metrics["mean_patient_pooled_precision"], 1.0)
             self.assertAlmostEqual(head_metrics["mean_patient_pooled_recall"], (3 / 4 + 3) / 4)
+            global_summary = summarize_global_patient_mask_dice(patient_rows, 100, 123)
+            self.assertEqual(global_summary["n_patients"], 4)
+            self.assertEqual(global_summary["n_patient_mask_observations"], 28)
+            self.assertEqual(global_summary["median_patient_pooled_dice"], 1.0)
             exclusions = unknown_affected_status_rows(image_rows)
             self.assertEqual([row["filename"] for row in exclusions], ["Patient_3000_AP_1.bmp"])
             missing_stage = missing_affected_stage_rows(image_rows)

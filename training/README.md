@@ -9,7 +9,7 @@ cd /d <github_repo_location>
 The input directory contains radiograph BMPs at its root and eight matching binary-mask directories under `masks/`. During local staging, every radiograph is converted into RGB `_0000`, `_0001`, and `_0002` NIfTI channels and the class masks are merged into one multiclass `labelsTr` NIfTI file.
 
 ```bat
-conda env create -f training\environment.yml
+conda env create -f environment.yml
 conda activate perthesmetrics
 python training\train_nnunet2d.py ^
   --data-dir <data_dir> ^
@@ -24,3 +24,17 @@ Patient-grouped folds are inferred from the required `Patient_<numeric_id>...` f
 After training, the complete package is copied to `<data_dir>/trainingMMDDYYYY/`, for example `<data_dir>/training08242026/`, including `export/perthesmetrics_nnunet_model.zip`, split audits, reports, and model files. No training masks are copied back.
 
 Rerunning with the same `--scratch-dir` automatically reuses complete staged NIfTI data and preprocessing. Existing fold checkpoints are resumed; a fold without a checkpoint starts normally. Use `--rebuild-scratch` only when staged data must be deleted and regenerated. Successful training deletes scratch unless `--keep-scratch` is supplied.
+
+## Supplemental training and validation figures
+
+After all five folds and their final validation runs are complete, generate the
+publication supplement from the nnU-Net model directory:
+
+```bat
+python tools\generate_nnunet_training_supplement.py ^
+  --model-dir "<NNUNET_RESULTS>/<DATASET>/nnUNetTrainer__nnUNetPlans__2d" ^
+  --output-dir "<OUTPUT_DIR>/fig"
+```
+
+The command writes `supplementalfigure1` through `supplementalfigure5` as both
+300-dpi PNG and vector PDF files, together with captions and CSV source tables.
