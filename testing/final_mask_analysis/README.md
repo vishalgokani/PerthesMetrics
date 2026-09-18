@@ -91,6 +91,24 @@ python tools\final_mask_analysis.py ^
 - `mask_colors.csv`: RGB and hex colors used consistently for overlays and
   boxplot dots.
 
+## Figure 4
+
+After generating the aggregate analysis CSVs, build the final seven-panel
+Figure 4 with:
+
+```bat
+python tools\build_figure4_stage_performance.py ^
+  --analysis-dir "<OUTPUT_DIR>" ^
+  --output-dir "<FIGURE_DIR>"
+```
+
+The script reads only `overall_model_performance_by_mask.csv` and
+`analysis_group_model_performance_by_mask.csv`. It writes `Figure4.pdf`,
+`Figure4.svg`, and a 600-DPI `Figure4.png`. Each panel shows the mean
+patient-pooled Dice and patient-bootstrap 95% confidence interval for Overall,
+Unaffected, and stages Ia through IV. The dashed 0.80 line is a descriptive
+benchmark; the figure does not perform or annotate subgroup hypothesis tests.
+
 ## Notes
 
 Waldenstrom classes are read from `ap_classes.csv` and `frog_classes.csv` as

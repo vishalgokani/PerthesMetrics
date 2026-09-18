@@ -82,6 +82,17 @@ folders `1a`, `1b`, `2a`, `2b`, `3a`, `3b`, and `4`. It writes a self-contained
 SVG, 600-DPI PNG, and PDF; run `tools/waldenstrom_figure_builder.py --help` for
 the CLI.
 
+Build Figure 4 from the aggregate patient-bootstrap CSV outputs without reading
+patient-level data:
+
+```bat
+python tools\build_figure4_stage_performance.py ^
+  --analysis-dir "<OUTPUT_DIR>" ^
+  --output-dir "<FIGURE_DIR>"
+```
+
+This writes `Figure4.pdf`, `Figure4.svg`, and a 600-DPI `Figure4.png`.
+
 ## Intended use
 
 This software and associated models are for research use. They are not medical devices and must not be used as the sole basis for diagnosis or treatment.
