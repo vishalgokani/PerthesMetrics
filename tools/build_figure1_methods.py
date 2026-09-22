@@ -20,14 +20,14 @@ CANVAS_HEIGHT = 1050
 FONT = "Times New Roman, Times, serif"
 
 CLASS_COLORS = (
-    ("Acetabulum", "#FF0000"),
     ("Femoral head", "#00FFFF"),
     ("Femoral neck", "#F5AA42"),
     ("Femoral shaft", "#000080"),
+    ("Greater trochanter", "#A020F0"),
+    ("Lesser trochanter", "#00FF00"),
     ("Sourcil", "#4169E1"),
     ("Triradiate cartilage", "#B8FF85"),
-    ("Lesser trochanter", "#00FF00"),
-    ("Greater trochanter", "#A020F0"),
+    ("Acetabulum", "#FF0000"),
 )
 
 

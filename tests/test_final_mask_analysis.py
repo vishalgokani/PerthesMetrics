@@ -35,10 +35,14 @@ def write_mask(path: Path, active_pixels: list[tuple[int, int]]) -> None:
 
 class FinalMaskAnalysisTests(unittest.TestCase):
     def test_plot_masks_are_view_specific(self) -> None:
-        self.assertEqual(plot_mask_order("ap")[-2:], ["lt", "gt"])
-        self.assertNotIn("lt", plot_mask_order("frog"))
-        self.assertNotIn("gt", plot_mask_order("frog"))
-        self.assertEqual(plot_mask_order("frog")[-1], "triradiate cartilage")
+        self.assertEqual(
+            plot_mask_order("ap"),
+            ["head", "neck_shaft", "gt", "lt", "sourcil", "triradiate cartilage", "acetabulum"],
+        )
+        self.assertEqual(
+            plot_mask_order("frog"),
+            ["head", "neck_shaft", "sourcil", "triradiate cartilage", "acetabulum"],
+        )
 
     def test_publication_default_is_only_the_080_cutoff(self) -> None:
         args = build_parser().parse_args([])

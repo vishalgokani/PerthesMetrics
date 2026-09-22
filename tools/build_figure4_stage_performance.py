@@ -26,13 +26,13 @@ from matplotlib.lines import Line2D
 GROUPS = ("Overall", "Unaffected", "Ia", "Ib", "IIa", "IIb", "IIIa", "IIIb", "IV")
 STAGE_GROUPS = set(GROUPS[2:])
 MASKS = (
-    "acetabulum",
     "head",
     "neck_shaft",
+    "gt",
+    "lt",
     "sourcil",
     "triradiate cartilage",
-    "lt",
-    "gt",
+    "acetabulum",
 )
 MASK_LABELS = {
     "acetabulum": "Acetabulum",
@@ -169,7 +169,7 @@ def configure_style() -> None:
             "font.size": 11,
             "axes.titlesize": 14,
             "axes.labelsize": 13,
-            "xtick.labelsize": 9.5,
+            "xtick.labelsize": 11.5,
             "ytick.labelsize": 10.5,
             "pdf.fonttype": 42,
             "ps.fonttype": 42,
@@ -246,8 +246,6 @@ def build_figure(
         axis.set_ylim(0.47, 1.01)
         axis.set_xticks(positions)
         axis.set_xticklabels(GROUPS, rotation=42, ha="right", rotation_mode="anchor")
-        if panel_index >= 4:
-            axis.set_xlabel("Analysis Stratum")
         finish_axis(axis)
 
     axes.flat[-1].axis("off")
@@ -273,8 +271,8 @@ def build_figure(
         frameon=False,
         ncol=2,
         loc="center",
-        fontsize=10.5,
-        title_fontsize=11.5,
+        fontsize=12.5,
+        title_fontsize=14.5,
         columnspacing=1.4,
     )
     return figure
@@ -301,10 +299,14 @@ def atomic_savefig(figure: plt.Figure, path: Path, **kwargs: object) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def export_figure(figure: plt.Figure, output_dir: Path, dpi: int) -> tuple[Path, Path, Path]:
+def export_figure(
+    figure: plt.Figure, output_dir: Path, dpi: int, output_name: str = "Figure4"
+) -> tuple[Path, Path, Path]:
     if dpi < 300:
         raise ValueError("Use --dpi 300 or higher for publication output.")
-    prefix = output_dir / "Figure4"
+    if not output_name or Path(output_name).name != output_name or Path(output_name).suffix:
+        raise ValueError("--output-name must be a filename stem without a path or extension.")
+    prefix = output_dir / output_name
     pdf_path = prefix.with_suffix(".pdf")
     svg_path = prefix.with_suffix(".svg")
     png_path = prefix.with_suffix(".png")
@@ -332,7 +334,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         required=True,
         type=Path,
-        help="Destination directory for Figure4.pdf, Figure4.svg, and Figure4.png.",
+        help="Destination directory for PDF, SVG, and PNG outputs.",
+    )
+    parser.add_argument(
+        "--output-name",
+        default="Figure4",
+        help="Output filename stem without an extension (default: Figure4).",
     )
     parser.add_argument("--benchmark", type=float, default=0.80)
     parser.add_argument("--dpi", type=int, default=600)
@@ -343,7 +350,9 @@ def main() -> int:
     args = build_parser().parse_args()
     estimates = load_estimates(args.analysis_dir.resolve())
     figure = build_figure(estimates, benchmark=args.benchmark)
-    paths = export_figure(figure, args.output_dir.resolve(), dpi=args.dpi)
+    paths = export_figure(
+        figure, args.output_dir.resolve(), dpi=args.dpi, output_name=args.output_name
+    )
     for path in paths:
         print(f"Wrote {path}")
     return 0

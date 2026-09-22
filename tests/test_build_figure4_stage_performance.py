@@ -65,8 +65,11 @@ def make_inputs(root: Path) -> None:
 def test_load_estimates_requires_every_group_and_mask(tmp_path: Path) -> None:
     make_inputs(tmp_path)
     estimates = load_estimates(tmp_path)
+    assert MASKS == (
+        "head", "neck_shaft", "gt", "lt", "sourcil", "triradiate cartilage", "acetabulum"
+    )
     assert len(estimates) == len(GROUPS) * len(MASKS)
-    assert estimates[("Overall", "acetabulum")].mean == pytest.approx(0.72)
+    assert estimates[("Overall", "head")].mean == pytest.approx(0.72)
     assert estimates[("IV", "gt")].ci_high <= 1.0
 
 
@@ -91,9 +94,22 @@ def test_build_and_export_figure4(tmp_path: Path) -> None:
 
     assert pdf_path.read_bytes().startswith(b"%PDF")
     svg_text = svg_path.read_text(encoding="utf-8")
-    assert "a)  Acetabulum" in svg_text
-    assert "g)  Greater Trochanter" in svg_text
-    assert "Analysis stratum" in svg_text
+    assert "a)  Femoral Head" in svg_text
+    assert "g)  Acetabulum" in svg_text
+    assert svg_text.count("Analysis stratum") == 1
+    assert "Analysis Stratum" not in svg_text
     with Image.open(png_path) as image:
         assert image.width > image.height > 1000
 
+
+def test_export_figure_accepts_custom_output_name(tmp_path: Path) -> None:
+    make_inputs(tmp_path)
+    figure = build_figure(load_estimates(tmp_path))
+    paths = export_figure(
+        figure, tmp_path / "figures", dpi=300, output_name="Figure4_option_F_refined_seven_panel"
+    )
+    assert [path.name for path in paths] == [
+        "Figure4_option_F_refined_seven_panel.pdf",
+        "Figure4_option_F_refined_seven_panel.svg",
+        "Figure4_option_F_refined_seven_panel.png",
+    ]

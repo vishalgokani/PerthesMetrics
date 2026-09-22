@@ -47,12 +47,21 @@ ANALYSIS_MASK_ORDER = [
     "lt",
     "gt",
 ]
-FROG_PLOT_MASK_ORDER = [
+FIGURE3_MASK_ORDER = [
+    "head",
+    "neck_shaft",
+    "gt",
+    "lt",
+    "sourcil",
+    "triradiate cartilage",
     "acetabulum",
+]
+FROG_PLOT_MASK_ORDER = [
     "head",
     "neck_shaft",
     "sourcil",
     "triradiate cartilage",
+    "acetabulum",
 ]
 CLASS_ORDER = OVERLAY_CLASS_ORDER
 CLASS_DISPLAY = {
@@ -795,7 +804,7 @@ def analysis_group_sort_key(value: object) -> int:
 
 def plot_mask_order(view: str) -> list[str]:
     """Return structures appropriate for a radiograph view."""
-    return FROG_PLOT_MASK_ORDER if view == "frog" else ANALYSIS_MASK_ORDER
+    return FROG_PLOT_MASK_ORDER if view == "frog" else FIGURE3_MASK_ORDER
 
 
 def format_metric_ci(row: dict[str, object], metric: str, digits: int = 2) -> str:
@@ -1049,6 +1058,21 @@ def plot_stage_view_boxplots(
         if math.isfinite(row.dice):
             grouped[(row.analysis_group, row.view, row.mask)].append(row.dice)
 
+    # Keep each mask's point jitter unchanged when the display order changes.
+    jitter_by_group: dict[tuple[str, str, str], np.ndarray] = {}
+    for analysis_group in ANALYSIS_GROUP_ORDER:
+        for view in VIEW_ORDER:
+            original_order = (
+                ["acetabulum", "head", "neck_shaft", "sourcil", "triradiate cartilage"]
+                if view == "frog" else ANALYSIS_MASK_ORDER
+            )
+            for mask_name in original_order:
+                values = grouped.get((analysis_group, view, mask_name), [])
+                if values:
+                    jitter_by_group[(analysis_group, view, mask_name)] = rng.uniform(
+                        -0.16, 0.16, size=len(values)
+                    )
+
     for row_index, analysis_group in enumerate(ANALYSIS_GROUP_ORDER):
         for col_index, view in enumerate(VIEW_ORDER):
             axis = axes[row_index, col_index]
@@ -1058,7 +1082,7 @@ def plot_stage_view_boxplots(
             for position, mask_name, values in zip(positions, mask_order, values_by_mask):
                 if not values:
                     continue
-                jitter = rng.uniform(-0.16, 0.16, size=len(values))
+                jitter = jitter_by_group[(analysis_group, view, mask_name)]
                 axis.scatter(
                     np.full(len(values), position) + jitter,
                     values,
@@ -1116,7 +1140,7 @@ def plot_stage_view_boxplots(
             markersize=6,
             label=CLASS_DISPLAY[name],
         )
-        for name in ANALYSIS_MASK_ORDER
+        for name in FIGURE3_MASK_ORDER
     ]
     figure.suptitle(
         "Patient-pooled Dice by affected status, Waldenstrom stage, and radiograph view",
