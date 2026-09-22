@@ -24,6 +24,7 @@ from matplotlib.lines import Line2D
 
 
 GROUPS = ("Overall", "Unaffected", "Ia", "Ib", "IIa", "IIb", "IIIa", "IIIb", "IV")
+TIFF_DPI = 600
 STAGE_GROUPS = set(GROUPS[2:])
 MASKS = (
     "head",
@@ -300,8 +301,12 @@ def atomic_savefig(figure: plt.Figure, path: Path, **kwargs: object) -> None:
 
 
 def export_figure(
-    figure: plt.Figure, output_dir: Path, dpi: int, output_name: str = "Figure4"
-) -> tuple[Path, Path, Path]:
+    figure: plt.Figure,
+    output_dir: Path,
+    dpi: int,
+    output_name: str = "Figure4",
+    tiff_dpi: int = TIFF_DPI,
+) -> tuple[Path, Path, Path, Path]:
     if dpi < 300:
         raise ValueError("Use --dpi 300 or higher for publication output.")
     if not output_name or Path(output_name).name != output_name or Path(output_name).suffix:
@@ -310,13 +315,21 @@ def export_figure(
     pdf_path = prefix.with_suffix(".pdf")
     svg_path = prefix.with_suffix(".svg")
     png_path = prefix.with_suffix(".png")
+    tiff_path = prefix.with_suffix(".tif")
     try:
         atomic_savefig(figure, pdf_path, bbox_inches="tight")
         atomic_savefig(figure, svg_path, bbox_inches="tight")
         atomic_savefig(figure, png_path, dpi=dpi, bbox_inches="tight")
+        atomic_savefig(
+            figure,
+            tiff_path,
+            dpi=tiff_dpi,
+            bbox_inches="tight",
+            pil_kwargs={"compression": "raw"},
+        )
     finally:
         plt.close(figure)
-    return pdf_path, svg_path, png_path
+    return pdf_path, svg_path, png_path, tiff_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -334,7 +347,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         required=True,
         type=Path,
-        help="Destination directory for PDF, SVG, and PNG outputs.",
+        help="Destination directory for PDF, SVG, PNG, and TIFF outputs.",
     )
     parser.add_argument(
         "--output-name",

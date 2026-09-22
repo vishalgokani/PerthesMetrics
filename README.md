@@ -79,7 +79,7 @@ To prepare publication panels, use `tools/cropper.py` to apply one interactive
 square crop to as many as ten same-sized images. The Waldenstrom figure builder
 discovers original, ground-truth, and nnU-Net panels by filename under stage
 folders `1a`, `1b`, `2a`, `2b`, `3a`, `3b`, and `4`. It writes a self-contained
-SVG, 600-DPI PNG, and PDF; run `tools/waldenstrom_figure_builder.py --help` for
+SVG, 600-DPI PNG/TIFF, and PDF; run `tools/waldenstrom_figure_builder.py --help` for
 the CLI.
 
 Build Figure 4 from the aggregate patient-bootstrap CSV outputs without reading
@@ -91,7 +91,8 @@ python tools\build_figure4_stage_performance.py ^
   --output-dir "<FIGURE_DIR>"
 ```
 
-This writes `Figure4.pdf`, `Figure4.svg`, and a 600-DPI `Figure4.png`.
+This writes `Figure4.pdf`, `Figure4.svg`, `Figure4.png`, and a 600-DPI
+`Figure4.tif`.
 
 ## Intended use
 

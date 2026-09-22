@@ -136,15 +136,27 @@ class FinalMaskAnalysisTests(unittest.TestCase):
             groups = {row.analysis_group for row in analysis_group_view_rows}
             self.assertEqual(groups, {"Ia", "Unaffected"})
             figure_path = root / "stage_view_boxplot.png"
-            plot_stage_view_boxplots(figure_path, analysis_group_view_rows, 123)
+            plot_stage_view_boxplots(figure_path, analysis_group_view_rows, 123, tiff_dpi=72)
             self.assertTrue(figure_path.is_file())
             self.assertTrue(figure_path.with_suffix(".pdf").is_file())
             self.assertTrue(figure_path.with_suffix(".svg").is_file())
+            self.assertTrue(figure_path.with_suffix(".tif").is_file())
+            svg_text = figure_path.with_suffix(".svg").read_text(encoding="utf-8")
+            self.assertIn("Frog-leg lateral", svg_text)
+            self.assertIn(">DSC</text>", svg_text)
+            self.assertNotIn(">FROG</text>", svg_text)
             cutoff_path = root / "stage_view_boxplot_cutoff_0_90.png"
-            plot_stage_view_boxplots(cutoff_path, analysis_group_view_rows, 123, cutoff=0.90)
+            plot_stage_view_boxplots(
+                cutoff_path,
+                analysis_group_view_rows,
+                123,
+                cutoff=0.90,
+                tiff_dpi=72,
+            )
             self.assertTrue(cutoff_path.is_file())
             self.assertTrue(cutoff_path.with_suffix(".pdf").is_file())
             self.assertTrue(cutoff_path.with_suffix(".svg").is_file())
+            self.assertTrue(cutoff_path.with_suffix(".tif").is_file())
 
             table_path = root / "publication_table"
             write_publication_table_figure(

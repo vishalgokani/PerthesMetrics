@@ -1040,6 +1040,7 @@ def plot_stage_view_boxplots(
     rows: list[PatientMaskDice],
     seed: int,
     cutoff: float | None = None,
+    tiff_dpi: int = 600,
 ) -> None:
     filtered = [row for row in rows if row.analysis_group in ANALYSIS_GROUP_ORDER and row.view in VIEW_ORDER]
     if not filtered:
@@ -1112,18 +1113,19 @@ def plot_stage_view_boxplots(
             axis.set_ylim(-0.02, 1.02)
             axis.set_xlim(0.4, len(mask_order) + 0.6)
             axis.grid(axis="y", color="0.88", linewidth=0.6)
-            axis.tick_params(axis="y", labelsize=9)
+            axis.tick_params(axis="y", labelsize=11)
             if row_index == 0:
-                axis.set_title(view.upper(), fontsize=13, fontweight="bold")
+                view_title = "AP" if view == "ap" else "Frog-leg lateral"
+                axis.set_title(view_title, fontsize=14, fontweight="bold")
             if col_index == 0:
-                axis.set_ylabel(f"{analysis_group}\nDice", fontsize=11)
+                axis.set_ylabel(f"{analysis_group}\nDSC", fontsize=13)
             if row_index == len(ANALYSIS_GROUP_ORDER) - 1:
                 axis.set_xticks(positions)
                 axis.set_xticklabels(
                     [CLASS_DISPLAY[name] for name in mask_order],
                     rotation=38,
                     ha="right",
-                    fontsize=9,
+                    fontsize=12,
                 )
             else:
                 axis.set_xticks(positions)
@@ -1137,7 +1139,7 @@ def plot_stage_view_boxplots(
             color="white",
             markerfacecolor=rgb01(CLASS_COLORS[name]),
             markeredgecolor="black",
-            markersize=6,
+            markersize=7.5,
             label=CLASS_DISPLAY[name],
         )
         for name in FIGURE3_MASK_ORDER
@@ -1153,7 +1155,7 @@ def plot_stage_view_boxplots(
         loc="lower center",
         ncol=4,
         frameon=False,
-        fontsize=9,
+        fontsize=11,
         bbox_to_anchor=(0.5, 0.005),
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1161,6 +1163,13 @@ def plot_stage_view_boxplots(
         atomic_savefig(figure, path.with_suffix(".pdf"), bbox_inches="tight")
         atomic_savefig(figure, path.with_suffix(".svg"), bbox_inches="tight")
         atomic_savefig(figure, path, dpi=300, bbox_inches="tight")
+        atomic_savefig(
+            figure,
+            path.with_suffix(".tif"),
+            dpi=tiff_dpi,
+            bbox_inches="tight",
+            pil_kwargs={"compression": "raw"},
+        )
     finally:
         plt.close(figure)
 

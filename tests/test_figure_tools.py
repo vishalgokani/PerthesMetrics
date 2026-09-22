@@ -79,9 +79,30 @@ def test_builder_exports_png_and_pdf(tmp_path: Path) -> None:
     paths = make_figure_inputs(tmp_path / "inputs")
     prefix = tmp_path / "waldenstrom"
     build_svg(paths, prefix.with_suffix(".svg"))
-    export_png_and_pdf(prefix.with_suffix(".svg"), prefix, dpi=72)
+    export_png_and_pdf(prefix.with_suffix(".svg"), prefix, dpi=72, tiff_dpi=72)
     assert Image.open(prefix.with_suffix(".png")).size == (
         510,
         round((CANVAS_HEIGHT / 10) / 25.4 * 72),
     )
     assert prefix.with_suffix(".pdf").read_bytes().startswith(b"%PDF")
+    with Image.open(prefix.with_suffix(".tif")) as tiff:
+        assert tiff.size == Image.open(prefix.with_suffix(".png")).size
+        assert tiff.info["dpi"] == (72.0, 72.0)
+
+
+def test_builder_adds_anatomical_color_legend_without_title(tmp_path: Path) -> None:
+    paths = make_figure_inputs(tmp_path / "inputs")
+    svg = tmp_path / "figure.svg"
+    build_svg(paths, svg)
+    text = svg.read_text(encoding="utf-8")
+    assert "Anatomical label classes" not in text
+    assert "Femoral head" in text
+    assert "Triradiate cartilage" in text
+    assert text.count(">Model Predictions</text>") == 2
+    assert '<rect x="180"' in text
+    head_index = text.index("Femoral head")
+    neck_index = text.index("Femoral neck")
+    shaft_index = text.index("Femoral shaft")
+    assert 'x="180"' in text[head_index - 250:head_index]
+    assert 'x="180"' in text[neck_index - 250:neck_index]
+    assert 'x="580"' in text[shaft_index - 250:shaft_index]

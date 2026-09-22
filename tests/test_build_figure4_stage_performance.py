@@ -90,7 +90,9 @@ def test_build_and_export_figure4(tmp_path: Path) -> None:
     output_dir = tmp_path / "figures"
     make_inputs(analysis_dir)
     figure = build_figure(load_estimates(analysis_dir))
-    pdf_path, svg_path, png_path = export_figure(figure, output_dir, dpi=300)
+    pdf_path, svg_path, png_path, tiff_path = export_figure(
+        figure, output_dir, dpi=300, tiff_dpi=72
+    )
 
     assert pdf_path.read_bytes().startswith(b"%PDF")
     svg_text = svg_path.read_text(encoding="utf-8")
@@ -100,16 +102,23 @@ def test_build_and_export_figure4(tmp_path: Path) -> None:
     assert "Analysis Stratum" not in svg_text
     with Image.open(png_path) as image:
         assert image.width > image.height > 1000
+    with Image.open(tiff_path) as image:
+        assert image.info["dpi"] == (72.0, 72.0)
 
 
 def test_export_figure_accepts_custom_output_name(tmp_path: Path) -> None:
     make_inputs(tmp_path)
     figure = build_figure(load_estimates(tmp_path))
     paths = export_figure(
-        figure, tmp_path / "figures", dpi=300, output_name="Figure4_option_F_refined_seven_panel"
+        figure,
+        tmp_path / "figures",
+        dpi=300,
+        output_name="Figure4_option_F_refined_seven_panel",
+        tiff_dpi=72,
     )
     assert [path.name for path in paths] == [
         "Figure4_option_F_refined_seven_panel.pdf",
         "Figure4_option_F_refined_seven_panel.svg",
         "Figure4_option_F_refined_seven_panel.png",
+        "Figure4_option_F_refined_seven_panel.tif",
     ]

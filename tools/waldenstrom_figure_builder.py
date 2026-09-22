@@ -26,14 +26,25 @@ STAGES = (
 COLUMNS = (
     ("ap", "original", "Original"),
     ("ap", "ground_truth_masks", "Ground truth"),
-    ("ap", "nnunet_masks", "Mask"),
+    ("ap", "nnunet_masks", "Model Predictions"),
     ("frog", "original", "Original"),
     ("frog", "ground_truth_masks", "Ground truth"),
-    ("frog", "nnunet_masks", "Mask"),
+    ("frog", "nnunet_masks", "Model Predictions"),
 )
 IMAGE_COUNT = len(STAGES) * len(COLUMNS)
 SUPPORTED_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff"}
 FONT = "Times New Roman, Times, serif"
+TIFF_DPI = 600
+CLASS_COLORS = (
+    ("Femoral head", "#00FFFF"),
+    ("Femoral neck", "#F5AA42"),
+    ("Femoral shaft", "#000080"),
+    ("Greater trochanter", "#A020F0"),
+    ("Lesser trochanter", "#00FF00"),
+    ("Sourcil", "#4169E1"),
+    ("Triradiate cartilage", "#B8FF85"),
+    ("Acetabulum", "#FF0000"),
+)
 
 CANVAS_WIDTH = 1800
 CELL = 250
@@ -46,7 +57,7 @@ HEADER_RULE_Y = 158
 FIRST_ROW_Y = 174
 WITHIN_STAGE_GAP = 8
 BETWEEN_STAGE_GAP = 22
-BOTTOM_MARGIN = 20
+BOTTOM_MARGIN = 145
 
 
 def row_positions() -> tuple[int, ...]:
@@ -194,12 +205,30 @@ def build_svg(image_paths: Sequence[Path] | None, output_svg: Path) -> None:
                 f'x2="{CANVAS_WIDTH - RIGHT_MARGIN}" y2="{separator_y}" '
                 'stroke="#a9a9a9" stroke-width="1.5"/>'
             )
+    grid_bottom = ys[-1] + CELL
+    legend_xs = (x_positions()[0], 580, 980, 1380)
+    legend_ys = (grid_bottom + 50, grid_bottom + 100)
+    for index, (label, color) in enumerate(CLASS_COLORS):
+        x = legend_xs[index // 2]
+        y = legend_ys[index % 2]
+        parts.extend(
+            [
+                f'<rect x="{x}" y="{y - 25}" width="28" height="28" '
+                f'fill="{color}" stroke="#202020" stroke-width="1.5"/>',
+                svg_text(x + 42, y - 2, label, 25, anchor="start"),
+            ]
+        )
     parts.append("</svg>")
     output_svg.parent.mkdir(parents=True, exist_ok=True)
     output_svg.write_text("\n".join(parts) + "\n", encoding="utf-8")
 
 
-def export_png_and_pdf(svg_path: Path, output_prefix: Path, dpi: int) -> None:
+def export_png_pdf_and_tiff(
+    svg_path: Path,
+    output_prefix: Path,
+    dpi: int,
+    tiff_dpi: int = TIFF_DPI,
+) -> None:
     try:
         import cairosvg
     except ImportError as error:
@@ -212,13 +241,40 @@ def export_png_and_pdf(svg_path: Path, output_prefix: Path, dpi: int) -> None:
         output_height=round((CANVAS_HEIGHT / 10) / 25.4 * dpi),
     )
     cairosvg.svg2pdf(url=str(svg_path), write_to=str(output_prefix.with_suffix(".pdf")))
+    if dpi == tiff_dpi:
+        tiff_source: Path | io.BytesIO = output_prefix.with_suffix(".png")
+    else:
+        tiff_source = io.BytesIO(
+            cairosvg.svg2png(
+                url=str(svg_path),
+                output_width=round((CANVAS_WIDTH / 10) / 25.4 * tiff_dpi),
+                output_height=round((CANVAS_HEIGHT / 10) / 25.4 * tiff_dpi),
+            )
+        )
+    with Image.open(tiff_source) as png:
+        png.convert("RGB").save(
+            output_prefix.with_suffix(".tif"),
+            format="TIFF",
+            compression="raw",
+            dpi=(tiff_dpi, tiff_dpi),
+        )
+
+
+def export_png_and_pdf(
+    svg_path: Path,
+    output_prefix: Path,
+    dpi: int,
+    tiff_dpi: int = TIFF_DPI,
+) -> None:
+    """Backward-compatible alias that now also writes a TIFF."""
+    export_png_pdf_and_tiff(svg_path, output_prefix, dpi, tiff_dpi)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Discover prepared panels by filename and build SVG, PDF, and PNG "
-            "versions of the full Waldenstrom staging figure."
+            "Discover prepared panels by filename and build SVG, PDF, PNG, and "
+            "TIFF versions of the full Waldenstrom staging figure."
         )
     )
     parser.add_argument(
@@ -227,11 +283,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output-prefix", required=True, type=Path,
-        help="Output path without an extension (writes .svg, .pdf, and .png)",
+        help="Output path without an extension (writes .svg, .pdf, .png, and .tif)",
     )
     parser.add_argument(
         "--dpi", type=int, default=600,
-        help="PNG resolution in dots per inch (default: 600)",
+        help="PNG resolution in dots per inch (default: 600); TIFF is always 600 DPI",
     )
     parser.add_argument(
         "--layout-preview", action="store_true",
@@ -257,10 +313,11 @@ def main() -> int:
     prefix.parent.mkdir(parents=True, exist_ok=True)
     svg_path = prefix.with_suffix(".svg")
     build_svg(paths, svg_path)
-    export_png_and_pdf(svg_path, prefix, args.dpi)
+    export_png_pdf_and_tiff(svg_path, prefix, args.dpi)
     print(f"SVG: {svg_path}")
     print(f"PDF: {prefix.with_suffix('.pdf')}")
     print(f"PNG ({args.dpi} DPI): {prefix.with_suffix('.png')}")
+    print(f"TIFF ({TIFF_DPI} DPI): {prefix.with_suffix('.tif')}")
     return 0
 
 

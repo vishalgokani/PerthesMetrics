@@ -1,14 +1,15 @@
 """Build publication Figure 1: cohort, annotation, and model workflow.
 
 The four square radiograph panels are embedded in the SVG as PNG data URIs, so
-the SVG remains self-contained. PDF and high-resolution PNG versions are
-exported from that same vector source.
+the SVG remains self-contained. PDF, high-resolution PNG, and 600-DPI TIFF
+versions are exported from that same vector source.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import io
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -18,6 +19,7 @@ from PIL import Image
 CANVAS_WIDTH = 2100
 CANVAS_HEIGHT = 1050
 FONT = "Times New Roman, Times, serif"
+TIFF_DPI = 600
 
 CLASS_COLORS = (
     ("Femoral head", "#00FFFF"),
@@ -242,7 +244,12 @@ def build_svg(
     output_svg.write_text("\n".join(parts) + "\n", encoding="utf-8")
 
 
-def export_png_and_pdf(svg_path: Path, output_prefix: Path, dpi: int) -> None:
+def export_png_and_pdf(
+    svg_path: Path,
+    output_prefix: Path,
+    dpi: int,
+    tiff_dpi: int = TIFF_DPI,
+) -> None:
     try:
         import cairosvg
     except ImportError as error:
@@ -256,6 +263,23 @@ def export_png_and_pdf(svg_path: Path, output_prefix: Path, dpi: int) -> None:
         output_width=round(210 / 25.4 * dpi),
         output_height=round(105 / 25.4 * dpi),
     )
+    if dpi == tiff_dpi:
+        tiff_source: Path | io.BytesIO = output_prefix.with_suffix(".png")
+    else:
+        tiff_source = io.BytesIO(
+            cairosvg.svg2png(
+                url=str(svg_path),
+                output_width=round(210 / 25.4 * tiff_dpi),
+                output_height=round(105 / 25.4 * tiff_dpi),
+            )
+        )
+    with Image.open(tiff_source) as png:
+        png.convert("RGB").save(
+            output_prefix.with_suffix(".tif"),
+            format="TIFF",
+            compression="raw",
+            dpi=(tiff_dpi, tiff_dpi),
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -286,6 +310,7 @@ def main() -> None:
     print(f"Wrote {svg_path}")
     print(f"Wrote {prefix.with_suffix('.pdf')}")
     print(f"Wrote {prefix.with_suffix('.png')}")
+    print(f"Wrote {prefix.with_suffix('.tif')} ({TIFF_DPI} DPI)")
 
 
 if __name__ == "__main__":
