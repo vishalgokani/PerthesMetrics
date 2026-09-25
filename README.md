@@ -27,7 +27,7 @@ training/       patient-grouped five-fold training and model export
 inference/      inference from a local or hosted nnU-Net model zip
 model_release/  validate and prepare installable release artifacts
 results/        lightweight, aggregate publication results
-tools/          dataset conversion and results utilities
+tools/          evaluation, publication-figure, and data utilities
 tests/          fast unit and archive-validation tests
 ```
 
@@ -70,29 +70,11 @@ Inference commands, local-model and Hugging Face workflows, batch examples, inpu
 
 Use [model_release/](model_release/README.md) to validate and package an exported model. Use `tools/build_publication_results.py` to create sanitized aggregate results without committing images, model weights, or case-level records.
 
-For held-out test-set mask analysis, use `tools/final_mask_analysis.py`. It
-creates patient-pooled Dice tables, patient-bootstrap 95% confidence intervals,
-Waldenstrom-stage AP/frog boxplots, and optional mask overlay figures. See
-[testing/final_mask_analysis/README.md](testing/final_mask_analysis/README.md).
-
-To prepare publication panels, use `tools/cropper.py` to apply one interactive
-square crop to as many as ten same-sized images. The Waldenstrom figure builder
-discovers original, ground-truth, and nnU-Net panels by filename under stage
-folders `1a`, `1b`, `2a`, `2b`, `3a`, `3b`, and `4`. It writes a self-contained
-SVG, 600-DPI PNG/TIFF, and PDF; run `tools/waldenstrom_figure_builder.py --help` for
-the CLI.
-
-Build Figure 4 from the aggregate patient-bootstrap CSV outputs without reading
-patient-level data:
-
-```bat
-python tools\build_figure4_stage_performance.py ^
-  --analysis-dir "<OUTPUT_DIR>" ^
-  --output-dir "<FIGURE_DIR>"
-```
-
-This writes `Figure4.pdf`, `Figure4.svg`, `Figure4.png`, and a 600-DPI
-`Figure4.tif`.
+Evaluation, cohort-summary, publication-figure, and dataset-conversion commands
+are indexed in [tools/README.md](tools/README.md). That guide identifies the
+inputs and outputs for held-out mask analysis, Figures 1 and 4, the Waldenstrom
+staging figure, cohort demographics, training supplements, and supporting
+utilities.
 
 ## Intended use
 

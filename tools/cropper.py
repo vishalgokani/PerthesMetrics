@@ -15,10 +15,7 @@ Windows PowerShell example using portable placeholder directories::
     python tools/cropper.py "<INPUT_DIR>\\image_01.png" "<INPUT_DIR>\\image_02.png" --output-dir "<OUTPUT_DIR>"
 
 Replace ``<INPUT_DIR>`` with the directory containing the source images and
-``<OUTPUT_DIR>`` with the directory where cropped files should be written. For
-example::
-
-    python tools/cropper.py "C:\\path\\to\\input\\ap.png" "C:\\path\\to\\input\\frog_leg.png" --output-dir "C:\\path\\to\\output"
+``<OUTPUT_DIR>`` with the directory where cropped files should be written.
 
 In the window that opens:
 

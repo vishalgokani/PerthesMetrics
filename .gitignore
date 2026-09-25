@@ -4,7 +4,6 @@ outputs/
 nnunet_masks*/
 scratch/
 final_mask_analysis_outputs/
-testing/final_mask_analysis/outputs/
 .tmp_*/
 tmp/
 *.pt
